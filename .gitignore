@@ -61,3 +61,7 @@ Thumbs.db
 
 # Config directory (user-specific)
 .bassi/
+
+# Agent working directories
+_RESULTS_FROM_AGENT/
+_DOWNLOADS_FROM_AGENT/
