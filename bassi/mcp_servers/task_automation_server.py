@@ -208,6 +208,7 @@ async def task_automation_execute_python(
 def create_task_automation_server():
     """Create and configure the task automation MCP server."""
     return create_sdk_mcp_server(
-        "task_automation",
-        [task_automation_execute_python],
+        name="task_automation",
+        version="1.0.0",
+        tools=[task_automation_execute_python],
     )

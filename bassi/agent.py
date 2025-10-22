@@ -55,62 +55,86 @@ class BassiAgent:
     """
 
     SYSTEM_PROMPT = """
-You are bassi, Benno's personal assistant. You help with tasks by:
-1. Executing bash commands to solve problems
-2. Searching the web for current information
-3. Managing emails and calendar (Microsoft 365)
-4. Automating browser interactions (Playwright)
-5. Planning and executing multi-step tasks
-6. Providing clear, helpful responses
+You are bassi, Benno's personal assistant. You help solve problems using various tools
+provided by MCP (Model Context Protocol) servers.
 
-IMPORTANT: File Organization - Unless explicitly told otherwise, use these folders:
-- Read user-provided files (images, PDFs, documents) from: _DATA_FROM_USER/
-- Save reusable scripts you create to: _SCRIPTS_FROM_AGENT/
-- Save output and results (analysis, reports, generated data) to: _RESULTS_FROM_AGENT/
-- Save files downloaded from web to: _DOWNLOADS_FROM_AGENT/
+# Tool Categories & Usage Guidelines
 
-When solving tasks:
-- Break down complex tasks into steps
-- Use bash commands for file operations (fd, rg, find, grep, etc.)
-- Use web search for current information, facts, and real-time data
-- Use MS365 tools for email and calendar management
-- Use Playwright tools for browser automation (navigate, click, type, etc.)
-- Be proactive and thorough
-- Explain what you're doing
+## 1. File Operations & System Commands
+**Use: Bash tools**
+- File search: fd (fast) or find (classic)
+- Content search: rg (fast) or grep (classic)
+- File operations: ls, cat, cp, mv, mkdir, etc.
+- Git operations: git status, git log, git diff, etc.
+- System info: df, ps, top, etc.
 
-IMPORTANT: Microsoft 365 Authentication:
-- BEFORE using ANY MS365 tools (email, calendar), you MUST ensure authentication
-- First, call mcp__ms365__verify-login to check if already authenticated
-- If NOT authenticated or token is invalid, call mcp__ms365__login
-- The login tool will:
-  * Check for cached tokens first (automatic)
-  * If no valid token, provide a URL and code for browser authentication
-  * Wait for user to complete authentication in browser
-- After successful login, proceed with MS365 operations
-- Token caching is automatic - subsequent sessions will use cached credentials
+## 2. Web Information & Research
+**Use: Web search tools**
+- Current events and news
+- Real-time data (weather, prices, stocks)
+- Documentation and how-to guides
+- Fact-checking and research
 
-IMPORTANT: You must use these specific tools:
-- mcp__bash__execute: Execute shell commands (use fd/rg for fast file search)
-- mcp__web__search: Search the web for current information
-- mcp__task_automation__execute_python: Execute Python code for automation tasks (image processing, file organization, data transformation)
-- mcp__ms365__login: Authenticate to Microsoft 365 (checks cache first, then browser auth)
-- mcp__ms365__verify-login: Check authentication status
-- mcp__ms365__list-mail-messages: Read emails from Outlook
-- mcp__ms365__send-mail: Send emails via Outlook
-- mcp__ms365__list-calendar-events: View calendar events
-- mcp__ms365__create-calendar-event: Create calendar events
-- mcp__playwright__browser_navigate: Navigate to URL in browser
-- mcp__playwright__browser_click: Click elements in browser
-- mcp__playwright__browser_type: Type text in browser
-- mcp__playwright__browser_screenshot: Take screenshots
+## 3. Batch Automation & Data Processing
+**Use: Python automation tools**
+- Image processing: compress, resize, convert formats (PIL/Pillow)
+- File organization: batch rename, sort by metadata (pathlib)
+- Data transformation: CSV/JSON processing (pandas)
+- Text processing: batch find/replace, extraction (re, pathlib)
+- The code runs in an isolated subprocess with timeout enforcement
 
-Do NOT use the built-in Bash or other tools - only use the mcp__ prefixed tools.
+## 4. Email & Calendar Management
+**Use: MS365 tools**
 
-Available Unix tools via mcp__bash__execute:
-- fd: Fast file search (fd pattern)
-- rg: Fast content search (rg pattern)
-- find: Classic file search (find . -name pattern)
-- grep: Classic content search (grep -r pattern)
+⚠️ **CRITICAL - Authentication Required:**
+1. ALWAYS call verify-login FIRST before any MS365 operation
+2. If not authenticated, call login tool (checks cache, then browser auth)
+3. Token caching is automatic - subsequent sessions reuse credentials
+4. Only proceed with email/calendar operations after successful authentication
+
+Available operations:
+- Read/send emails (Outlook)
+- List/create calendar events
+- Draft messages
+
+## 5. Browser Automation
+**Use: Playwright tools**
+- Navigate to URLs
+- Click elements, type text
+- Take screenshots
+- Fill forms
+- Extract data from web pages
+
+## 6. Database Access
+**Use: Database tools (if configured)**
+- Execute SQL queries
+- Read database schemas
+- Query relational data
+
+# General Guidelines
+
+**File Organization** - Unless explicitly told otherwise:
+- Read user files from: `_DATA_FROM_USER/`
+- Save scripts to: `_SCRIPTS_FROM_AGENT/`
+- Save results/reports to: `_RESULTS_FROM_AGENT/`
+- Save downloads to: `_DOWNLOADS_FROM_AGENT/`
+
+**Problem Solving Approach:**
+1. Break complex tasks into steps
+2. Choose the most appropriate tool category
+3. Execute and verify results
+4. Be proactive and thorough
+5. Explain what you're doing
+
+**Tool Naming Convention:**
+- All tools follow pattern: `mcp__{server}__{tool_name}`
+- Examples: `mcp__bash__execute`, `mcp__web__search`
+- The Agent SDK provides complete tool schemas with parameters
+
+**Important:**
+- Do NOT use built-in tools (like Bash) - only use MCP tools with `mcp__` prefix
+- The Agent SDK dynamically discovers and injects all available tools
+- Tool availability depends on configured MCP servers
 """
 
     def __init__(
@@ -149,43 +173,12 @@ Available Unix tools via mcp__bash__execute:
             **self.external_mcp_servers,
         }
 
-        # Collect all allowed tools
-        allowed_tools = [
-            "mcp__bash__execute",
-            "mcp__web__search",
-        ]
+        # Dynamic tool discovery: allowed_tools=None means "allow ALL discovered tools"
+        # This eliminates the need to manually maintain tool lists
+        # The Agent SDK will automatically discover and inject all tools from MCP servers
+        allowed_tools = None  # Allow all discovered tools!
 
-        # Add MS365 tools if configured
-        if "ms365" in self.external_mcp_servers:
-            ms365_tools = [
-                "mcp__ms365__login",
-                "mcp__ms365__verify-login",
-                "mcp__ms365__list-mail-messages",
-                "mcp__ms365__send-mail",
-                "mcp__ms365__list-calendar-events",
-                "mcp__ms365__create-calendar-event",
-            ]
-            allowed_tools.extend(ms365_tools)
-            logger.info(
-                f"📧 MS365 MCP server configured with {len(ms365_tools)} tools"
-            )
-
-        # Add Playwright tools if configured
-        if "playwright" in self.external_mcp_servers:
-            playwright_tools = [
-                "mcp__playwright__browser_navigate",
-                "mcp__playwright__browser_screenshot",
-                "mcp__playwright__browser_click",
-                "mcp__playwright__browser_type",
-                "mcp__playwright__browser_select",
-                "mcp__playwright__browser_hover",
-                "mcp__playwright__browser_evaluate",
-                "mcp__playwright__browser_install",
-            ]
-            allowed_tools.extend(playwright_tools)
-            logger.info(
-                f"🎭 Playwright MCP server configured with {len(playwright_tools)} tools"
-            )
+        logger.info("🔓 Dynamic tool discovery enabled - all MCP tools allowed")
 
         # Agent options
         self.options = ClaudeAgentOptions(
@@ -259,50 +252,21 @@ Available Unix tools via mcp__bash__execute:
                         f"    [dim]Command: {command} {' '.join(args)}[/dim]"
                     )
 
-            # Available Tools Summary (fully dynamic)
-            total_tools = (
-                len(self.options.allowed_tools)
-                if self.options.allowed_tools
-                else 0
+            # Available Tools Summary
+            # With allowed_tools=None, all discovered tools from MCP servers are available
+            self.console.print(
+                f"\n[bold yellow]📋 Tool Discovery Mode:[/bold yellow]"
             )
             self.console.print(
-                f"\n[bold yellow]📋 Total Available Tools:[/bold yellow] {total_tools}"
+                "  [bold green]🔓 Dynamic Discovery Enabled[/bold green] - All tools from configured MCP servers are automatically allowed"
             )
-
-            # Dynamically group tools by server
-            # Tool names follow pattern: mcp__<server_name>__<tool_name>
-            tools_by_server = {}
-            for tool in self.options.allowed_tools or []:
-                parts = tool.split("__")
-                if len(parts) >= 3 and parts[0] == "mcp":
-                    server_name = parts[1]
-                    tool_name = "__".join(parts[2:])
-                    if server_name not in tools_by_server:
-                        tools_by_server[server_name] = []
-                    tools_by_server[server_name].append(tool_name)
-
-            # Display tools grouped by server
-            for server_name, tools in sorted(tools_by_server.items()):
-                # Use different colors for SDK vs external servers
-                if server_name in self.sdk_mcp_servers:
-                    color = "cyan"
-                else:
-                    color = "magenta"
-
-                # Capitalize server name for display
-                display_name = server_name.replace("_", " ").title()
-                self.console.print(
-                    f"  • [{color}]{display_name}[/{color}]: {len(tools)} tool(s)"
-                )
-
-                # Show first 3 tools as preview
-                if tools:
-                    preview_tools = tools[:3]
-                    preview = ", ".join(preview_tools)
-                    if len(tools) > 3:
-                        preview += "..."
-                    self.console.print(f"    [dim]→ {preview}[/dim]")
-
+            self.console.print()
+            self.console.print(
+                "  [dim italic]Tools will be discovered and listed after first query to Claude.[/dim italic]"
+            )
+            self.console.print(
+                "  [dim italic]Ask: \"show me all mcp servers and all tools\" to see the complete list![/dim italic]"
+            )
             self.console.print()
 
         except Exception as e:

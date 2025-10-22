@@ -113,16 +113,23 @@ self.options = ClaudeAgentOptions(
 
 ### Allowed Tools
 
-While `bypassPermissions` approves all tool use, we still specify `allowed_tools` to:
-1. Document which tools are available
-2. Limit the agent's capabilities to only configured MCP servers
-3. Provide clearer error messages if tools are missing
+With `bypassPermissions` mode, we set `allowed_tools=None` to enable **fully dynamic tool discovery**:
 
-**Current allowed tools**:
-- `mcp__bash__execute` - Execute shell commands
-- `mcp__web__search` - Web search
-- `mcp__ms365__*` - Microsoft 365 operations
-- `mcp__playwright__*` - Browser automation
+```python
+allowed_tools = None  # Allow ALL discovered tools from MCP servers
+```
+
+**What This Means**:
+- All tools from configured MCP servers are automatically allowed
+- No manual tool list maintenance required
+- Add/remove MCP servers = tools automatically available/unavailable
+- True "dangerously-skip-permissions" mode
+
+**Benefits**:
+✅ Zero maintenance overhead
+✅ Scales effortlessly to any number of tools
+✅ Automatic discovery and allowlisting
+✅ No hardcoded tool lists to keep in sync
 
 ## Switching Permission Modes
 
