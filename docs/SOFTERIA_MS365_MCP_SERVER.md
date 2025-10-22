@@ -17,9 +17,9 @@ Instead of implementing a custom MS Graph MCP server, we discovered that bassi a
 ### ✅ `.env` File Configured
 
 ```bash
-MS365_CLIENT_ID=<your-client-id>
-MS365_TENANT_ID=<your-tenant-id>
-MS365_CLIENT_SECRET=<your-client-secret>
+MS365_CLIENT_ID=xxx
+MS365_TENANT_ID=yyy
+MS365_CLIENT_SECRET=zzz
 ```
 
 ### ✅ `.mcp.json` Configuration
@@ -45,7 +45,7 @@ MS365_CLIENT_SECRET=<your-client-secret>
 - **App Name**: bassi-personal-assistant
 - **Client ID**: <your-client-id>
 - **Tenant ID**: <your-tenant-id>
-- **Client Secret**: <your-client-secret> (ID: 1b990a46-9a1a-4a33-9897-88ff1b795e03)
+- **Client Secret**: see .env
 - **Permissions**: All 7 required permissions granted (User.Read, Mail.*, Calendars.*, offline_access)
 - **Public Client Flows**: Enabled
 
