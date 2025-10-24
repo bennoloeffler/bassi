@@ -711,8 +711,19 @@ Available operations:
                     # - After auto-compaction, they don't reflect actual context size
                     # - SDK manages context internally with auto-compaction at ~95%
                     # - Only SDK knows the real context state after compaction
+
+                    # Convert milliseconds to minutes and seconds
+                    duration_seconds = duration_ms / 1000
+                    minutes = int(duration_seconds // 60)
+                    seconds = duration_seconds % 60
+
+                    if minutes > 0:
+                        time_str = f"{minutes}m {seconds:.1f}s"
+                    else:
+                        time_str = f"{seconds:.1f}s"
+
                     usage_line = (
-                        f"⏱️  {duration_ms}ms | "
+                        f"⏱️  {time_str} | "
                         f"💰 ${cost:.4f} | "
                         f"💵 Total: ${self.total_cost_usd:.4f}"
                     )

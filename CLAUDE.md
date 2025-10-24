@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Technical Requirements**: `docs/requirements.md` - Tech stack, data models, and security requirements
 
 ## Key Features Documentation
+Features are described in `docs/features_concepts/<feature_name>.md`
+E.g.:
 - **Permissions**: `docs/features_concepts/permissions.md` - Permission model and autonomous operation
 - **O365 Authentication**: `docs/features_concepts/o365_authentication.md` - Microsoft 365 authentication and token caching
 
@@ -24,23 +26,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`docs/features_concepts/`** - Feature-specific documentation
 
 ## Working with spec-kit
-if the command /specify /plan or /task is used, have a look at files: README.md docs/vision.md docs/design.md docs/requirements.md you may find all the hints you need.
+https://github.com/github/spec-kit
+
+if one of the commands
+- /speckit.specify
+- /speckit.plan
+is used, look at files: 
+- README.md 
+- docs/vision.md 
+- docs/design.md 
+- docs/requirements.md
+- docs/features_concepts/** 
+you may find all the hints you need.
 
 ## for your coding practice, there are some important rules:
 1. Start by analysing features and document the feature and update the documentation.
    Features get a name and the place to document them are here:
    `docs/features_concepts/<feature_name>.md`
-2. implement tests 
-3. implement the feature - carefully decide to create DRY modules. In doubt, read:
-   file `CLAUDE_BBS.md` - do not over-engineer. BUT CREATE REUSABLE COMPONENTS. BBS style.
-4. 
-   You may read the current last log entries by something like:
+2. implement tests first 
+3. implement the feature - carefully decide to create DRY modules. In doubt, read file `CLAUDE_BBS.md` - do not over-engineer. BUT CREATE REUSABLE COMPONENTS. BBS style.
+4. You may read the current last log entries by something like:
    file server.log # that you may read with:
    `tail -n 300 server.log`
 5. run all tests (with `uv run pytest` or even more intense `./check.sh`)
 6. iterate on the feature until tests are running and user is satisfied
-7. if feature is implemented: 
-   update the docs
+7. if feature is implemented: update the docs
 
 ## Development Commands
 
@@ -60,8 +70,6 @@ tail -n 300 server.log
 
 ```
 
-
-
 ### Package Management
 - Use `uv add <package>` to install new dependencies
 - Use `uv sync` to sync dependencies
@@ -76,8 +84,9 @@ tail -n 300 server.log
 2. ruff check --fix .      # Linting with auto-fix
 3. mypy .                 # Type checking
 4. uv run pytest          # All tests
-5. pytest                 # All tests, shorter
 
 # Always run ./check.sh before committing changes
 ```
 
+## Project Structure
+see README.md
