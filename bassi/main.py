@@ -2,6 +2,7 @@
 Main CLI entry point for bassi - Async version with Claude Agent SDK
 """
 
+import argparse
 import json
 import logging
 import os
@@ -222,8 +223,31 @@ def show_command_selector() -> str | None:
         return None
 
 
-async def main_async() -> None:
-    """Main CLI loop - async version"""
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="bassi - Benno's Personal Assistant"
+    )
+    parser.add_argument("--web", action="store_true", help="Enable web UI")
+    parser.add_argument(
+        "--no-cli",
+        action="store_true",
+        help="Disable CLI (web-only mode)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8765, help="Web UI port (default: 8765)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="localhost",
+        help="Web UI host (default: localhost)",
+    )
+    return parser.parse_args()
+
+
+async def cli_main_loop(agent: BassiAgent) -> None:
+    """Run the CLI main loop (extracted for clarity)"""
     import termios
 
     # Ensure terminal is in sane cooked mode at startup
@@ -505,6 +529,84 @@ async def main_async() -> None:
             termios.tcsetattr(fd, termios.TCSANOW, attrs)
         except Exception:
             pass
+
+
+async def main_async() -> None:
+    """Main async entry point with web UI support"""
+    args = parse_args()
+
+    # Print banner (if CLI mode)
+    if not args.no_cli:
+        print_welcome()
+
+    # Initialize agent with status callback
+    current_status = ["Ready"]  # Use list for mutable reference
+
+    def update_status(message: str):
+        current_status[0] = message
+
+    # Check for saved context FIRST
+    resume_session_id: str | None = None
+    saved_context = None
+
+    context_file = Path.cwd() / ".bassi_context.json"
+    if context_file.exists() and not args.no_cli:
+        # Only prompt if in CLI mode
+        try:
+            saved_context = json.loads(context_file.read_text())
+            console.print(
+                "\n[bold yellow]📋 Found saved context from previous session[/bold yellow]"
+            )
+
+            load_choice = Prompt.ask(
+                "Load previous context?", choices=["y", "n"], default="y"
+            )
+            if load_choice.lower() == "y":
+                resume_session_id = saved_context.get("session_id")
+                if resume_session_id:
+                    console.print(
+                        f"[dim]Resuming session: {resume_session_id[:8]}...[/dim]\n"
+                    )
+        except Exception as e:
+            console.print(
+                f"[yellow]Warning: Could not load context: {e}[/yellow]"
+            )
+
+    # Initialize agent
+    agent = BassiAgent(
+        status_callback=update_status, resume_session_id=resume_session_id
+    )
+
+    # Start web server if enabled
+    if args.web:
+        from bassi.web_server import start_web_server
+
+        console.print(
+            f"[bold green]🌐 Starting web UI on http://{args.host}:{args.port}[/bold green]"
+        )
+
+        async with anyio.create_task_group() as tg:
+            # Start web server in background
+            tg.start_soon(start_web_server, agent, args.host, args.port)
+
+            # Run CLI unless --no-cli specified
+            if not args.no_cli:
+                await cli_main_loop(agent)
+                tg.cancel_scope.cancel()  # Stop web server when CLI exits
+            else:
+                # Web-only mode - keep running
+                console.print(
+                    "[bold green]Running in web-only mode. Press Ctrl+C to stop.[/bold green]"
+                )
+                try:
+                    await anyio.sleep_forever()
+                except KeyboardInterrupt:
+                    console.print(
+                        "\n[bold blue]Shutting down web server...[/bold blue]"
+                    )
+    else:
+        # CLI-only mode (default)
+        await cli_main_loop(agent)
 
 
 def main() -> None:

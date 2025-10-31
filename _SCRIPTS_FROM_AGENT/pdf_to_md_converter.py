@@ -5,7 +5,6 @@ Finds the first 10 PDFs recursively in home directory and converts them to Markd
 Saves the output in pdf_to_md/ directory.
 """
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -21,9 +20,9 @@ def find_pdfs(root_dir: Path, max_count: int = 10) -> list[Path]:
             break
 
         # Skip hidden directories and system directories
-        if any(part.startswith('.') for part in pdf_path.parts):
+        if any(part.startswith(".") for part in pdf_path.parts):
             continue
-        if 'Library' in pdf_path.parts or 'System' in pdf_path.parts:
+        if "Library" in pdf_path.parts or "System" in pdf_path.parts:
             continue
 
         pdfs.append(pdf_path)
@@ -64,7 +63,7 @@ def pdf_to_markdown(pdf_path: Path, output_dir: Path) -> bool:
             return False
 
     except FileNotFoundError:
-        print(f"  ⚠️  pdftotext not found. Install with: brew install poppler")
+        print("  ⚠️  pdftotext not found. Install with: brew install poppler")
         print(f"     Skipping: {pdf_path.name}")
         return False
     except subprocess.TimeoutExpired:
@@ -106,13 +105,15 @@ def main():
 
     # Summary
     print("=" * 60)
-    print(f"\n✅ Conversion complete!")
+    print("\n✅ Conversion complete!")
     print(f"   Successful: {success_count}/{len(pdfs)}")
     print(f"   Output directory: {output_dir}")
 
     if success_count < len(pdfs):
-        print(f"\n⚠️  Some conversions failed. Make sure pdftotext is installed:")
-        print(f"   brew install poppler")
+        print(
+            "\n⚠️  Some conversions failed. Make sure pdftotext is installed:"
+        )
+        print("   brew install poppler")
 
 
 if __name__ == "__main__":

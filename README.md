@@ -13,6 +13,7 @@ Personal assistant using Claude API. Executes bash commands, searches web, manag
 - 🐍 **Python Automation**: Execute Python code for batch processing, image manipulation, data transformation
 - 💬 **Conversational Interface**: Natural language dialog with streaming responses
 - 📊 **Rich CLI**: Terminal UI with status updates
+- 🌐 **Web UI**: Browser-based interface with real-time streaming and tool visualization
 
 ---
 
@@ -64,13 +65,33 @@ LOG_LEVEL=DEBUG
 
 ### 3. Run bassi
 
+**CLI Mode** (default):
 ```bash
-# Start bassi
+# Start bassi CLI
 uv run bassi
 
 # Or with logging to file
 ./run-agent.sh
 ```
+
+**Web UI Mode** (new!):
+```bash
+# Start web UI only
+uv run bassi --web --no-cli
+
+# Start web UI + CLI (both interfaces)
+uv run bassi --web
+
+# Custom port
+uv run bassi --web --port 9000
+```
+
+The web UI provides:
+- 🌐 **Browser-based interface** at http://localhost:8765
+- 📱 **Responsive design** - works on desktop and mobile
+- ✨ **Real-time streaming** markdown responses
+- 🔧 **Pretty-printed tool calls** with syntax highlighting
+- 💰 **Usage statistics** - tokens, cost, duration
 
 ### 4. First Commands to Try
 

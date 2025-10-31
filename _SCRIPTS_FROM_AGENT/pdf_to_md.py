@@ -5,10 +5,9 @@ Finds the first 10 PDF files recursively in home directory and converts them to 
 Saves output in the same directory as this script.
 """
 
-import os
-import sys
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
 
 def find_pdfs(start_dir, max_count=10):
     """Find PDF files recursively in the given directory."""
@@ -24,10 +23,11 @@ def find_pdfs(start_dir, max_count=10):
                 print(f"Found ({len(pdfs)}): {pdf_file}")
                 if len(pdfs) >= max_count:
                     break
-    except PermissionError as e:
-        print(f"⚠️  Permission denied for some directories, continuing...")
+    except PermissionError:
+        print("⚠️  Permission denied for some directories, continuing...")
 
     return pdfs
+
 
 def convert_pdf_to_markdown(pdf_path, output_dir):
     """Convert a PDF file to Markdown using pdftotext."""
@@ -49,7 +49,7 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
             ["pdftotext", "-layout", str(pdf_path), "-"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
 
         if result.returncode == 0:
@@ -57,29 +57,33 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
 
             # Check if we got any content
             if not text_content.strip():
-                print(f"  ⚠️  PDF appears to be empty or image-based")
+                print("  ⚠️  PDF appears to be empty or image-based")
                 # Try without layout for image-based PDFs
                 result2 = subprocess.run(
                     ["pdftotext", str(pdf_path), "-"],
                     capture_output=True,
                     text=True,
-                    timeout=30
+                    timeout=30,
                 )
                 text_content = result2.stdout
 
             # Add markdown header
             markdown_content = f"# {pdf_path.stem}\n\n"
             markdown_content += f"*Converted from: {pdf_path}*\n\n"
-            markdown_content += f"*File size: {pdf_path.stat().st_size / 1024:.1f} KB*\n\n"
+            markdown_content += (
+                f"*File size: {pdf_path.stat().st_size / 1024:.1f} KB*\n\n"
+            )
             markdown_content += "---\n\n"
             markdown_content += text_content
 
             # Write to markdown file
-            with open(md_path, 'w', encoding='utf-8') as f:
+            with open(md_path, "w", encoding="utf-8") as f:
                 f.write(markdown_content)
 
             char_count = len(text_content.strip())
-            print(f"  ✅ Successfully converted ({char_count} chars, {len(markdown_content)} total)")
+            print(
+                f"  ✅ Successfully converted ({char_count} chars, {len(markdown_content)} total)"
+            )
             return True
         else:
             error_msg = result.stderr.strip()
@@ -87,14 +91,17 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
             return False
 
     except FileNotFoundError:
-        print(f"  ❌ pdftotext not found. Please install: brew install poppler")
+        print(
+            "  ❌ pdftotext not found. Please install: brew install poppler"
+        )
         return False
     except subprocess.TimeoutExpired:
-        print(f"  ❌ Timeout (file too large or complex)")
+        print("  ❌ Timeout (file too large or complex)")
         return False
     except Exception as e:
         print(f"  ❌ Error: {e}")
         return False
+
 
 def main():
     """Main function to orchestrate PDF to Markdown conversion."""
@@ -117,7 +124,9 @@ def main():
 
     if not pdfs:
         print("\n❌ No PDF files found!")
-        print("   Try checking specific directories or adjusting search path.")
+        print(
+            "   Try checking specific directories or adjusting search path."
+        )
         return
 
     print(f"\n✅ Found {len(pdfs)} PDF file(s)")
@@ -145,6 +154,7 @@ def main():
     print(f"❌ Failed:                 {failed}")
     print(f"\n📁 Markdown files saved in: {output_dir}")
     print("=" * 70)
+
 
 if __name__ == "__main__":
     main()

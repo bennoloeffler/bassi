@@ -7,11 +7,14 @@ Features:
 - SDK MCP servers (in-process)
 - External MCP servers (via .mcp.json)
 - Status updates during operations
+- Event emission for web UI
 """
 
 import json
 import logging
 import os
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -42,6 +45,91 @@ logger = logging.getLogger(__name__)
 if os.getenv("BASSI_DEBUG"):
     logger.setLevel(logging.DEBUG)
     logging.getLogger().setLevel(logging.DEBUG)
+
+
+# Event system for web UI
+class EventType(Enum):
+    """Event types emitted by agent"""
+
+    CONTENT_DELTA = "content_delta"
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_END = "tool_call_end"
+    MESSAGE_COMPLETE = "message_complete"
+    STATUS_UPDATE = "status_update"
+    ERROR = "error"
+
+
+@dataclass
+class AgentEvent:
+    """Base event class"""
+
+    type: EventType
+
+
+@dataclass
+class ContentDeltaEvent(AgentEvent):
+    """Streaming text chunk"""
+
+    text: str
+
+    def __post_init__(self):
+        self.type = EventType.CONTENT_DELTA
+
+
+@dataclass
+class ToolCallStartEvent(AgentEvent):
+    """Tool call started"""
+
+    tool_name: str
+    input_data: dict
+
+    def __post_init__(self):
+        self.type = EventType.TOOL_CALL_START
+
+
+@dataclass
+class ToolCallEndEvent(AgentEvent):
+    """Tool call completed"""
+
+    tool_name: str
+    output_data: Any
+    success: bool
+
+    def __post_init__(self):
+        self.type = EventType.TOOL_CALL_END
+
+
+@dataclass
+class MessageCompleteEvent(AgentEvent):
+    """Message completed"""
+
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    duration_ms: int
+
+    def __post_init__(self):
+        self.type = EventType.MESSAGE_COMPLETE
+
+
+@dataclass
+class StatusUpdateEvent(AgentEvent):
+    """Status message"""
+
+    message: str
+
+    def __post_init__(self):
+        self.type = EventType.STATUS_UPDATE
+
+
+@dataclass
+class ErrorEvent(AgentEvent):
+    """Error occurred"""
+
+    message: str
+
+    def __post_init__(self):
+        self.type = EventType.ERROR
 
 
 class BassiAgent:
@@ -178,7 +266,9 @@ Available operations:
         # The Agent SDK will automatically discover and inject all tools from MCP servers
         allowed_tools = None  # Allow all discovered tools!
 
-        logger.info("🔓 Dynamic tool discovery enabled - all MCP tools allowed")
+        logger.info(
+            "🔓 Dynamic tool discovery enabled - all MCP tools allowed"
+        )
 
         # Agent options
         self.options = ClaudeAgentOptions(
@@ -255,7 +345,7 @@ Available operations:
             # Available Tools Summary
             # With allowed_tools=None, all discovered tools from MCP servers are available
             self.console.print(
-                f"\n[bold yellow]📋 Tool Discovery Mode:[/bold yellow]"
+                "\n[bold yellow]📋 Tool Discovery Mode:[/bold yellow]"
             )
             self.console.print(
                 "  [bold green]🔓 Dynamic Discovery Enabled[/bold green] - All tools from configured MCP servers are automatically allowed"
@@ -265,7 +355,7 @@ Available operations:
                 "  [dim italic]Tools will be discovered and listed after first query to Claude.[/dim italic]"
             )
             self.console.print(
-                "  [dim italic]Ask: \"show me all mcp servers and all tools\" to see the complete list![/dim italic]"
+                '  [dim italic]Ask: "show me all mcp servers and all tools" to see the complete list![/dim italic]'
             )
             self.console.print()
 
@@ -451,6 +541,11 @@ Available operations:
 
             await self.client.query(message)
 
+            # Track timing for MessageCompleteEvent
+            import time
+
+            request_start_time = time.time()
+
             # Stream responses
             async for msg in self.client.receive_response():
                 # Capture session_id from ResultMessage (ALWAYS, not just in verbose mode)
@@ -470,7 +565,15 @@ Available operations:
                 if self.verbose:
                     self._display_message(msg)
 
+                # Yield raw SDK message (for backward compatibility)
                 yield msg
+
+                # Also yield typed event (for web UI)
+                typed_event = self._convert_to_typed_event(
+                    msg, request_start_time
+                )
+                if typed_event:
+                    yield typed_event
 
             # Save context after successful completion
             self.save_context()
@@ -771,6 +874,105 @@ Available operations:
             self.console.print(
                 f"[dim red]Error displaying message: {e}[/dim red]"
             )
+
+    def _convert_to_typed_event(
+        self, msg: Any, request_start_time: float
+    ) -> AgentEvent | None:
+        """
+        Convert SDK message to typed event for web UI
+
+        Args:
+            msg: Raw SDK message
+            request_start_time: Timestamp when request started (for duration calculation)
+
+        Returns:
+            Typed AgentEvent or None if not convertible
+        """
+        import time
+
+        try:
+            msg_class_name = type(msg).__name__
+
+            # StreamEvent with content_block_delta (streaming text)
+            if msg_class_name == "StreamEvent":
+                event = getattr(msg, "event", {})
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        return ContentDeltaEvent(text=text)
+
+            # AssistantMessage with ToolUseBlock
+            elif msg_class_name == "AssistantMessage":
+                content = getattr(msg, "content", [])
+                for block in content:
+                    block_type = type(block).__name__
+                    if block_type == "ToolUseBlock":
+                        tool_name = getattr(block, "name", "unknown")
+                        tool_input = getattr(block, "input", {})
+                        return ToolCallStartEvent(
+                            tool_name=tool_name, input_data=tool_input
+                        )
+
+            # UserMessage with ToolResultBlock (tool completion)
+            elif msg_class_name == "UserMessage":
+                content = getattr(msg, "content", [])
+                for block in content:
+                    block_type = type(block).__name__
+                    if block_type == "ToolResultBlock":
+                        # Try to extract tool name from recent history
+                        # For now, we'll use a placeholder
+                        output = getattr(block, "content", "")
+                        is_error = getattr(block, "is_error", False)
+                        return ToolCallEndEvent(
+                            tool_name="tool",  # TODO: Track tool names
+                            output_data=output,
+                            success=not is_error,
+                        )
+
+            # ResultMessage with usage (message complete)
+            elif msg_class_name == "ResultMessage":
+                usage = getattr(msg, "usage", None)
+                if usage:
+                    input_tokens = getattr(usage, "input_tokens", 0)
+                    output_tokens = getattr(usage, "output_tokens", 0)
+                    cache_creation = getattr(
+                        usage, "cache_creation_input_tokens", 0
+                    )
+                    cache_read = getattr(usage, "cache_read_input_tokens", 0)
+
+                    # Calculate cost (rough estimate)
+                    # Sonnet 4.5: $3/MTok input, $15/MTok output
+                    cost_usd = (
+                        (input_tokens / 1_000_000) * 3.0
+                        + (output_tokens / 1_000_000) * 15.0
+                        + (cache_creation / 1_000_000) * 3.75
+                        + (cache_read / 1_000_000) * 0.30
+                    )
+
+                    duration_ms = int(
+                        (time.time() - request_start_time) * 1000
+                    )
+
+                    return MessageCompleteEvent(
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_usd=cost_usd,
+                        duration_ms=duration_ms,
+                    )
+
+            # SystemMessage (status updates, compaction, etc.)
+            elif msg_class_name == "SystemMessage":
+                subtype = getattr(msg, "subtype", "")
+                if "compact" in subtype.lower():
+                    return StatusUpdateEvent(
+                        message="Context window at ~95% - auto-compacting..."
+                    )
+
+        except Exception as e:
+            logger.exception(f"Error converting message to typed event: {e}")
+
+        return None
 
     async def reset(self) -> None:
         """Reset conversation - will create new client on next chat"""

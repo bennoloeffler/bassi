@@ -3,10 +3,9 @@
 Convert PDFs in the current directory to Markdown
 """
 
-import os
-import sys
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
 
 def convert_pdf_to_markdown(pdf_path, output_dir):
     """Convert a PDF file to Markdown using pdftotext."""
@@ -27,7 +26,7 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
             ["pdftotext", "-layout", str(pdf_path), "-"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
 
         if result.returncode == 0:
@@ -36,12 +35,14 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
             # Add markdown header
             markdown_content = f"# {pdf_path.stem}\n\n"
             markdown_content += f"*Converted from: {pdf_path.name}*\n\n"
-            markdown_content += f"*File size: {pdf_path.stat().st_size / 1024:.1f} KB*\n\n"
+            markdown_content += (
+                f"*File size: {pdf_path.stat().st_size / 1024:.1f} KB*\n\n"
+            )
             markdown_content += "---\n\n"
             markdown_content += text_content
 
             # Write to markdown file
-            with open(md_path, 'w', encoding='utf-8') as f:
+            with open(md_path, "w", encoding="utf-8") as f:
                 f.write(markdown_content)
 
             char_count = len(text_content.strip())
@@ -54,6 +55,7 @@ def convert_pdf_to_markdown(pdf_path, output_dir):
     except Exception as e:
         print(f"  ❌ Error: {e}")
         return False
+
 
 def main():
     """Convert all PDFs in current directory."""
@@ -102,6 +104,7 @@ def main():
     print(f"❌ Failed:  {failed}")
     print(f"\n📁 Output: {output_dir}")
     print("=" * 60)
+
 
 if __name__ == "__main__":
     main()
