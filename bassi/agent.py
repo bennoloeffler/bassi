@@ -13,7 +13,7 @@ Features:
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -63,7 +63,9 @@ class EventType(Enum):
 class AgentEvent:
     """Base event class"""
 
-    type: EventType
+    type: EventType = field(
+        init=False
+    )  # Will be set in __post_init__ by subclasses
 
 
 @dataclass
@@ -226,7 +228,10 @@ Available operations:
 """
 
     def __init__(
-        self, status_callback=None, resume_session_id: str | None = None
+        self,
+        status_callback=None,
+        resume_session_id: str | None = None,
+        display_tools: bool = True,
     ) -> None:
         """
         Initialize the Bassi Agent
@@ -234,6 +239,7 @@ Available operations:
         Args:
             status_callback: Optional callback for status updates
             resume_session_id: Optional session ID to resume from
+            display_tools: Whether to display available MCP servers and tools at startup (default: True)
         """
         # Log API configuration for debugging
         api_base_url = os.getenv(
@@ -305,8 +311,12 @@ Available operations:
         self.context_window_size = 200000  # 200K tokens
         self.compaction_threshold = 150000  # Compact at 75% of limit
 
-        # Display available MCP servers and tools
-        self._display_available_tools()
+        # Tool tracking for matching start/end events
+        self.last_tool_name: str | None = None
+
+        # Display available MCP servers and tools (only if display_tools=True)
+        if display_tools:
+            self._display_available_tools()
 
     def _display_available_tools(self) -> None:
         """Display available MCP servers and tools at startup (fully dynamic)"""
@@ -446,6 +456,17 @@ Available operations:
             if self.status_callback:
                 self.status_callback("⚠️ Interrupted")
 
+    async def cleanup(self) -> None:
+        """Clean up agent resources (for session isolation)"""
+        try:
+            if self.client:
+                logger.info("Cleaning up agent client")
+                await self.client.__aexit__(None, None, None)
+                self.client = None
+            logger.info("Agent cleanup completed")
+        except Exception as e:
+            logger.error(f"Error during agent cleanup: {e}")
+
     def save_context(self) -> None:
         """Save current context to file"""
         try:
@@ -565,15 +586,17 @@ Available operations:
                 if self.verbose:
                     self._display_message(msg)
 
-                # Yield raw SDK message (for backward compatibility)
-                yield msg
-
-                # Also yield typed event (for web UI)
+                # Convert to typed event for web UI
                 typed_event = self._convert_to_typed_event(
                     msg, request_start_time
                 )
                 if typed_event:
+                    # Yield typed event (for web UI)
                     yield typed_event
+                else:
+                    # Fallback: yield raw SDK message if no typed event
+                    # (for backward compatibility with CLI)
+                    yield msg
 
             # Save context after successful completion
             self.save_context()
@@ -910,6 +933,8 @@ Available operations:
                     if block_type == "ToolUseBlock":
                         tool_name = getattr(block, "name", "unknown")
                         tool_input = getattr(block, "input", {})
+                        # Store tool name for matching with ToolCallEndEvent
+                        self.last_tool_name = tool_name
                         return ToolCallStartEvent(
                             tool_name=tool_name, input_data=tool_input
                         )
@@ -920,12 +945,12 @@ Available operations:
                 for block in content:
                     block_type = type(block).__name__
                     if block_type == "ToolResultBlock":
-                        # Try to extract tool name from recent history
-                        # For now, we'll use a placeholder
+                        # Use stored tool name from matching ToolCallStartEvent
                         output = getattr(block, "content", "")
                         is_error = getattr(block, "is_error", False)
                         return ToolCallEndEvent(
-                            tool_name="tool",  # TODO: Track tool names
+                            tool_name=self.last_tool_name
+                            or "tool",  # Use tracked tool name
                             output_data=output,
                             success=not is_error,
                         )
@@ -1009,3 +1034,6 @@ Available operations:
                 logger.warning(f"Error during cleanup: {e}")
             finally:
                 self.client = None
+
+
+# Test

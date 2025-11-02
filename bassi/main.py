@@ -51,7 +51,7 @@ def print_welcome() -> None:
     )
 
     console.print(f"\n[bold magenta]# bassi v{__version__}[/bold magenta]")
-    console.print("Benno's Assistant - Your personal AI agent\n")
+    console.print("BELs Benno's Assistant - Your personal AI agent\n")
     console.print(f"[bold blue]📂 Working directory: {cwd}[/bold blue]")
     console.print(f"[bold blue]🌐 API Endpoint: {api_endpoint}[/bold blue]\n")
     console.print("Type your request or use commands:")
@@ -242,6 +242,11 @@ def parse_args():
         type=str,
         default="localhost",
         help="Web UI host (default: localhost)",
+    )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable hot reload for development (watches Python files)",
     )
     return parser.parse_args()
 
@@ -572,22 +577,49 @@ async def main_async() -> None:
                 f"[yellow]Warning: Could not load context: {e}[/yellow]"
             )
 
-    # Initialize agent
-    agent = BassiAgent(
-        status_callback=update_status, resume_session_id=resume_session_id
-    )
+    # Initialize agent (for CLI) - only if not in web-only mode
+    agent = None
+    if not args.no_cli:
+        agent = BassiAgent(
+            status_callback=update_status, resume_session_id=resume_session_id
+        )
 
     # Start web server if enabled
     if args.web:
         from bassi.web_server import start_web_server
 
+        # Create agent factory for web UI (one agent per connection)
+        def create_agent_instance():
+            """Factory function to create isolated agent instances for web UI"""
+            return BassiAgent(
+                status_callback=None,  # No CLI status callback for web UI
+                resume_session_id=None,  # Each connection starts fresh
+                display_tools=False,  # Suppress tools display for web UI agents
+            )
+
         console.print(
             f"[bold green]🌐 Starting web UI on http://{args.host}:{args.port}[/bold green]"
         )
 
+        # In web-only mode, create a temporary agent just to display tools once
+        if args.no_cli:
+            display_agent = BassiAgent(
+                status_callback=None,
+                resume_session_id=None,
+                display_tools=True,  # Show tools once at startup
+            )
+            # Clean up display agent immediately after showing tools
+            await display_agent.cleanup()
+
         async with anyio.create_task_group() as tg:
-            # Start web server in background
-            tg.start_soon(start_web_server, agent, args.host, args.port)
+            # Start web server in background with agent factory
+            tg.start_soon(
+                start_web_server,
+                create_agent_instance,
+                args.host,
+                args.port,
+                args.reload,
+            )
 
             # Run CLI unless --no-cli specified
             if not args.no_cli:
@@ -595,6 +627,10 @@ async def main_async() -> None:
                 tg.cancel_scope.cancel()  # Stop web server when CLI exits
             else:
                 # Web-only mode - keep running
+                if args.reload:
+                    console.print(
+                        "[bold green]🔥 Hot reload enabled - server will restart on file changes[/bold green]"
+                    )
                 console.print(
                     "[bold green]Running in web-only mode. Press Ctrl+C to stop.[/bold green]"
                 )

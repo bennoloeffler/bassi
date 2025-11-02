@@ -20,6 +20,7 @@ dependencies = [
     "fastapi>=0.120.3",
     "uvicorn>=0.38.0",
     "websockets>=15.0.1",
+    "fastmcp>=2.13.0.2",
 ]
 
 [project.scripts]

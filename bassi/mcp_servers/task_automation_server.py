@@ -165,7 +165,7 @@ The code runs in an isolated subprocess with timeout enforcement.
     },
 )
 async def task_automation_execute_python(
-    args: dict[str, Any]
+    args: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute Python code for automation tasks."""
     code = args.get("code", "")

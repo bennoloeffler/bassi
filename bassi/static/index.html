@@ -3,53 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>bassi - Benno's Assistant</title>
+    <title>Bassi - Claude Agent SDK Web UI</title>
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Prism.js for code highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+
     <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+
     <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markdown.min.js"></script>
 </head>
 <body>
     <!-- Header -->
     <header class="header">
         <div class="header-content">
-            <h1 class="title">🤖 bassi</h1>
-            <div class="connection-status">
-                <span id="status-indicator" class="status-dot offline"></span>
-                <span id="status-text">Connecting...</span>
+            <div class="title-section">
+                <h1 class="title">Bassi</h1>
+                <span class="version">V3</span>
+            </div>
+            <div class="header-controls">
+                <div class="verbose-selector">
+                    <label for="verbose-level">Verbosity:</label>
+                    <select id="verbose-level">
+                        <option value="minimal">Minimal</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="full">Full</option>
+                    </select>
+                </div>
+                <div id="connection-status" class="connection-status">
+                    🔄 Connecting...
+                </div>
             </div>
         </div>
     </header>
 
-    <!-- Conversation Container -->
-    <main class="conversation-container" id="conversation">
-        <!-- Messages will be appended here dynamically -->
-        <div class="welcome-message">
-            <h2>Welcome to bassi!</h2>
-            <p>Your personal AI assistant. Type a message below to get started.</p>
-        </div>
-    </main>
+    <!-- Conversation Area -->
+    <div id="conversation">
+        <!-- Messages will be dynamically added here -->
+    </div>
 
     <!-- Input Area -->
-    <footer class="input-container">
-        <textarea
-            id="message-input"
-            placeholder="Type your message here..."
-            rows="1"
-            autocomplete="off"
-        ></textarea>
-        <button id="send-button" class="btn-send" disabled>
-            <span>Send</span>
-        </button>
-    </footer>
+    <div class="input-container">
+        <div class="input-wrapper">
+            <textarea
+                id="message-input"
+                placeholder="Ask me anything..."
+                rows="1"
+                autocomplete="off"
+                spellcheck="true"
+            ></textarea>
+            <button id="send-button" disabled>
+                Send
+            </button>
+        </div>
+    </div>
 
+    <!-- Load our client script -->
     <script src="/static/app.js"></script>
 </body>
 </html>
