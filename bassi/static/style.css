@@ -947,6 +947,19 @@ body.hide-thinking .thinking-block {
     flex-grow: 1;
 }
 
+.tool-hint {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--text-muted);
+    margin-left: var(--spacing-sm);
+    opacity: 0.7;
+    transition: opacity var(--transition-fast);
+}
+
+.tool-header:hover .tool-hint {
+    opacity: 1;
+}
+
 .tool-status {
     font-size: 0.875rem;
     font-weight: 600;
@@ -1863,19 +1876,8 @@ code.cap-name {
     display: none !important;
 }
 
-/* Minimal Mode - Show headers only, hide tool details */
-.verbose-minimal .tool-body {
-    display: none !important;
-}
-
-.verbose-minimal .code-block-content {
-    display: none !important;
-}
-
-/* Full Mode - Show everything */
-.verbose-full .tool-body {
-    display: block !important;
-}
+/* Verbose modes only affect INITIAL state via JavaScript applyVerbosityToBox() */
+/* Individual box state is controlled by .collapsed class only */
 
 .verbose-full .tool-input,
 .verbose-full .tool-output,

@@ -1653,9 +1653,10 @@ class BassiWebClient {
         toolPanel.id = msg.id
         toolPanel.className = 'tool-call tool-running'
         toolPanel.innerHTML = `
-            <div class="tool-header" title="Click to expand/collapse">
+            <div class="tool-header" title="Click to expand/minimize">
                 <span class="tool-icon">${icon}</span>
                 <span class="tool-name">${this.escapeHtml(fullDisplayName)}</span>
+                <span class="tool-hint">Click to minimize</span>
                 <span class="tool-status">Running...</span>
             </div>
             <div class="tool-body">
@@ -1676,6 +1677,13 @@ class BassiWebClient {
 
         // Add toggle functionality with custom state tracking
         const header = toolPanel.querySelector('.tool-header')
+        const hintSpan = header.querySelector('.tool-hint')
+
+        // Set initial hint text based on current collapsed state
+        const initiallyCollapsed = toolPanel.classList.contains('collapsed')
+        hintSpan.textContent = initiallyCollapsed ? 'Click to expand' : 'Click to minimize'
+        header.title = initiallyCollapsed ? 'Click to expand' : 'Click to minimize'
+
         header.addEventListener('click', () => {
             const isCurrentlyCollapsed = toolPanel.classList.contains('collapsed')
 
@@ -1683,12 +1691,14 @@ class BassiWebClient {
                 // Expanding: remove collapsed class, store custom state
                 toolPanel.classList.remove('collapsed')
                 this.boxStates.set(msg.id, 'expanded')
-                header.title = 'Click to collapse'
+                header.title = 'Click to minimize'
+                hintSpan.textContent = 'Click to minimize'
             } else {
-                // Collapsing: add collapsed class, store custom state
+                // Minimizing: add collapsed class, store custom state
                 toolPanel.classList.add('collapsed')
                 this.boxStates.set(msg.id, 'collapsed')
                 header.title = 'Click to expand'
+                hintSpan.textContent = 'Click to expand'
             }
         })
 
@@ -2024,18 +2034,17 @@ class BassiWebClient {
     }
 
     applyVerbosityToBox(toolPanel, level) {
-        // Remove all verbosity classes
-        toolPanel.classList.remove('verbose-none', 'verbose-minimal', 'verbose-full')
-
-        // Apply the appropriate class based on level
+        // Set INITIAL collapse state based on verbosity level
+        // This only applies to new boxes - user can toggle individual boxes afterwards
         if (level === 'none') {
+            // Hide completely (handled by CSS)
             toolPanel.classList.add('verbose-none')
         } else if (level === 'minimal') {
-            toolPanel.classList.add('verbose-minimal')
-            toolPanel.classList.remove('collapsed')  // Ensure not collapsed for minimal
+            // Start collapsed (minimized)
+            toolPanel.classList.add('collapsed')
         } else if (level === 'full') {
-            toolPanel.classList.add('verbose-full')
-            toolPanel.classList.remove('collapsed')  // Ensure not collapsed for full
+            // Start expanded
+            toolPanel.classList.remove('collapsed')
         }
     }
 
