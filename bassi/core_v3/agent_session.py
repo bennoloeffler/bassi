@@ -160,14 +160,41 @@ class BassiAgentSession:
         await self.client.disconnect()
         self._connected = False
 
+    async def _create_multimodal_message(
+        self, content_blocks: list[dict], session_id: str
+    ):
+        """
+        Create an async generator for multimodal content.
+
+        The Agent SDK expects an AsyncIterable of message dictionaries in Anthropic API format.
+
+        Args:
+            content_blocks: List of content block dictionaries (Anthropic API format)
+            session_id: Session identifier
+
+        Yields:
+            Message dictionary in Agent SDK control protocol format
+        """
+        # Create a single message with multimodal content
+        message = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": content_blocks  # Pass content blocks directly (Anthropic API format)
+            },
+            "parent_tool_use_id": None,
+            "session_id": session_id,
+        }
+        yield message
+
     async def query(
-        self, prompt: str, session_id: str = "default"
+        self, prompt: str | list[dict], session_id: str = "default"
     ) -> AsyncIterator[Message]:
         """
         Send a query and stream responses.
 
         Args:
-            prompt: User prompt to send
+            prompt: User prompt (string) or content blocks (list of dicts for multimodal)
             session_id: Session identifier for multi-turn conversations
 
         Yields:
@@ -175,21 +202,41 @@ class BassiAgentSession:
 
         Example:
             ```python
+            # Text-only query
             async for message in session.query("Hello"):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
-                        if isinstance(block, TextBlock):
-                            print(block.text)
+                        print(block.text)
+
+            # Multimodal query (text + image)
+            content_blocks = [
+                {"type": "text", "text": "What's in this image?"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}}
+            ]
+            async for message in session.query(content_blocks):
+                ...
             ```
         """
         if not self._connected:
             await self.connect()
 
-        # Send query
-        await self.client.query(prompt, session_id=session_id)
+        # Handle multimodal vs text-only
+        if isinstance(prompt, list):
+            # Multimodal: Create async generator with message dictionary
+            sdk_prompt = self._create_multimodal_message(prompt, session_id)
+        else:
+            # Text-only: Pass string directly
+            sdk_prompt = prompt
+
+        # Send query (Agent SDK handles both string and AsyncIterable[dict])
+        await self.client.query(sdk_prompt, session_id=session_id)
 
         # Track in history
-        self.message_history.append(UserMessage(content=prompt))
+        # If prompt is a list, convert to UserMessage with content blocks
+        if isinstance(prompt, list):
+            self.message_history.append(UserMessage(content=prompt))
+        else:
+            self.message_history.append(UserMessage(content=prompt))
         self.stats.message_count += 1
 
         # Stream responses

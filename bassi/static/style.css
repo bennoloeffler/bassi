@@ -701,6 +701,27 @@ body {
     line-height: 1.6;
 }
 
+.user-message .message-images {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+    margin-top: var(--spacing-md);
+}
+
+.user-message .message-image {
+    max-width: 300px;
+    max-height: 300px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+    transition: all var(--transition-fast);
+}
+
+.user-message .message-image:hover {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-lg);
+}
+
 /* Assistant message */
 .assistant-message {
     margin-bottom: var(--spacing-xl);
@@ -1108,6 +1129,64 @@ body.hide-thinking .thinking-block {
     border-top: 1px solid var(--border);
     padding: var(--spacing-lg);
     backdrop-filter: blur(10px);
+}
+
+/* Image preview container */
+.image-preview-container {
+    max-width: 900px;
+    margin: 0 auto var(--spacing-md) auto;
+    display: none;
+}
+
+.image-preview-container .image-previews {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    padding: var(--spacing-sm);
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.image-preview {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-preview-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(13, 17, 23, 0.9);
+    color: var(--text-bright);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.image-preview-remove:hover {
+    background: var(--accent-red);
+    border-color: var(--accent-red);
+    transform: scale(1.1);
 }
 
 .input-wrapper {

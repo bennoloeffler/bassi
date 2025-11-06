@@ -386,16 +386,35 @@ class WebUIServerV3:
             # User sent a chat message
             content = data.get("content", "")
 
+            # Normalize content to content blocks array
+            # Support both string (backward compatible) and array (multimodal)
+            if isinstance(content, str):
+                # Text-only message (backward compatible)
+                content_blocks = [{"type": "text", "text": content}] if content else []
+                echo_content = content
+            elif isinstance(content, list):
+                # Multimodal content blocks
+                content_blocks = content
+                # Extract text for echo (for UI display)
+                text_blocks = [b for b in content if b.get("type") == "text"]
+                echo_content = text_blocks[0].get("text", "") if text_blocks else ""
+            else:
+                logger.error(f"Invalid content type: {type(content)}")
+                return
+
+            # Process and save images if present
+            await self._process_images(content_blocks)
+
             # IMPORTANT: Echo user's message back so it appears in conversation history
             await websocket.send_json(
                 {
                     "type": "user_message_echo",
-                    "content": content,
+                    "content": echo_content,
                 }
             )
 
             # Handle /help command - show available capabilities
-            if content.strip().lower() in ["/help", "help", "/?"]:
+            if echo_content.strip().lower() in ["/help", "help", "/?"]:
                 from bassi.core_v3.discovery import BassiDiscovery
 
                 discovery = BassiDiscovery(
@@ -691,7 +710,8 @@ class WebUIServerV3:
 
             try:
                 # Stream response from agent session
-                async for message in session.query(content):
+                # Pass content_blocks (supports both string and array)
+                async for message in session.query(content_blocks):
                     msg_type_name = type(message).__name__
                     print(f"📦 Got message: {msg_type_name}", flush=True)
 
@@ -1034,6 +1054,54 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
         else:
             logger.warning(f"Unknown message type: {msg_type}")
+
+    async def _process_images(self, content_blocks: list[dict[str, Any]]):
+        """
+        Process and save images from content blocks to _DATA_FROM_USER/ folder.
+
+        Args:
+            content_blocks: List of content blocks (may contain image blocks)
+        """
+        import base64
+        import time
+
+        for block in content_blocks:
+            if block.get("type") != "image":
+                continue
+
+            source = block.get("source", {})
+            if source.get("type") != "base64":
+                logger.warning(f"Unsupported image source type: {source.get('type')}")
+                continue
+
+            base64_data = source.get("data", "")
+            media_type = source.get("media_type", "image/png")
+            filename = block.get("filename", f"image_{int(time.time())}.png")
+
+            if not base64_data:
+                logger.warning("Empty image data, skipping")
+                continue
+
+            try:
+                # Decode base64
+                image_bytes = base64.b64decode(base64_data)
+
+                # Save to _DATA_FROM_USER/
+                data_dir = Path.cwd() / "_DATA_FROM_USER"
+                data_dir.mkdir(exist_ok=True)
+
+                save_path = data_dir / filename
+                save_path.write_bytes(image_bytes)
+
+                logger.info(
+                    f"📷 Saved image: {save_path} ({len(image_bytes)} bytes, {media_type})"
+                )
+
+                # Update block with saved path (for reference)
+                block["saved_path"] = str(save_path)
+
+            except Exception as e:
+                logger.error(f"Failed to save image {filename}: {e}")
 
     async def run(self, reload: bool = False):
         """

@@ -43,6 +43,9 @@ class BassiWebClient {
         this.markdownRenderer = null
         this.renderDebounceTimers = new Map()  // id -> timer
 
+        // Image handling
+        this.pendingImages = []                  // Images to send with next message
+
         // DOM elements
         this.conversationEl = document.getElementById('conversation')
         this.messageInput = document.getElementById('message-input')
@@ -94,6 +97,11 @@ class BassiWebClient {
         this.messageInput.addEventListener('input', () => {
             this.messageInput.style.height = 'auto'
             this.messageInput.style.height = this.messageInput.scrollHeight + 'px'
+        })
+
+        // Handle image paste
+        this.messageInput.addEventListener('paste', (e) => {
+            this.handlePaste(e)
         })
 
         if (this.verboseLevelSelect) {
@@ -588,6 +596,42 @@ class BassiWebClient {
         // Determine message type based on agent state
         const messageType = this.isAgentWorking ? 'hint' : 'user_message'
 
+        // Build content blocks (multimodal support)
+        const contentBlocks = []
+
+        // Add text if present
+        if (content) {
+            contentBlocks.push({
+                type: 'text',
+                text: content
+            })
+        }
+
+        // Add images if present
+        for (const img of this.pendingImages) {
+            contentBlocks.push({
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: img.media_type,
+                    data: img.data
+                },
+                filename: img.filename
+            })
+        }
+
+        // Must have at least text or image
+        if (contentBlocks.length === 0) {
+            return
+        }
+
+        // Prepare message content (backward compatible)
+        // If only text, send as string for backward compatibility
+        // If multimodal (text+image or image-only), send as content blocks array
+        const messageContent = contentBlocks.length === 1 && contentBlocks[0].type === 'text'
+            ? content  // Simple text-only (backward compatible)
+            : contentBlocks  // Multimodal content blocks
+
         // Add to UI with appropriate styling
         if (messageType === 'hint') {
             this.addHintMessage(content)
@@ -596,7 +640,8 @@ class BassiWebClient {
             this.blocks.clear()
             this.textBuffers.clear()
         } else {
-            this.addUserMessage(content)
+            // Display user message with images
+            this.addUserMessageWithImages(content, this.pendingImages)
             // Reset currentMessage for new conversation
             this.currentMessage = null
             this.blocks.clear()
@@ -606,12 +651,16 @@ class BassiWebClient {
         // Send to server
         this.ws.send(JSON.stringify({
             type: messageType,
-            content: content
+            content: messageContent
         }))
 
-        // Clear input and reset height
+        console.log(`📤 Sent ${messageType}:`, contentBlocks.length === 1 ? 'text-only' : `${contentBlocks.length} blocks`)
+
+        // Clear input, images, and reset height
         this.messageInput.value = ''
         this.messageInput.style.height = 'auto'
+        this.pendingImages = []
+        this.renderImagePreviews()
 
         // If this was a regular message, set agent working
         if (messageType === 'user_message') {
@@ -630,6 +679,133 @@ class BassiWebClient {
 
         // Update UI immediately
         this.setAgentWorking(false)
+    }
+
+    handlePaste(e) {
+        const items = e.clipboardData?.items
+        if (!items) return
+
+        // Look for images in clipboard
+        let foundImage = false
+        for (let item of items) {
+            if (item.type.startsWith('image/')) {
+                e.preventDefault()
+                foundImage = true
+
+                const file = item.getAsFile()
+                if (file) {
+                    this.addImageToMessage(file)
+                }
+            }
+        }
+
+        // If no image, let default paste behavior handle text
+        if (foundImage) {
+            console.log('📷 Image pasted from clipboard')
+        }
+    }
+
+    addImageToMessage(file) {
+        // Validate size (5MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+            alert('Image too large. Maximum size is 5MB per image.')
+            return
+        }
+
+        // Convert to base64
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            const dataUrl = e.target.result
+            const [header, base64Data] = dataUrl.split(',')
+            const mediaType = header.match(/:(.*?);/)[1]
+
+            // Validate media type
+            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
+            if (!allowedTypes.includes(mediaType)) {
+                alert(`Unsupported image format: ${mediaType}. Please use PNG, JPEG, GIF, or WebP.`)
+                return
+            }
+
+            // Store image data
+            const imageData = {
+                data: base64Data,
+                media_type: mediaType,
+                size: file.size,
+                filename: `screenshot_${Date.now()}.${mediaType.split('/')[1]}`
+            }
+
+            this.pendingImages.push(imageData)
+
+            console.log(`📷 Image added: ${imageData.filename} (${(file.size / 1024).toFixed(1)} KB)`)
+
+            // Show preview
+            this.renderImagePreviews()
+        }
+        reader.onerror = (error) => {
+            console.error('Failed to read image file:', error)
+            alert('Failed to read image file. Please try again.')
+        }
+        reader.readAsDataURL(file)
+    }
+
+    renderImagePreviews() {
+        // Get or create preview container
+        let previewContainer = document.getElementById('image-preview-container')
+        if (!previewContainer) {
+            // Create it before the input wrapper
+            const inputContainer = document.querySelector('.input-container')
+            const inputWrapper = document.querySelector('.input-wrapper')
+
+            previewContainer = document.createElement('div')
+            previewContainer.id = 'image-preview-container'
+            previewContainer.className = 'image-preview-container'
+
+            const previewsDiv = document.createElement('div')
+            previewsDiv.className = 'image-previews'
+            previewContainer.appendChild(previewsDiv)
+
+            inputContainer.insertBefore(previewContainer, inputWrapper)
+        }
+
+        const previewsDiv = previewContainer.querySelector('.image-previews')
+
+        // Clear existing previews
+        previewsDiv.innerHTML = ''
+
+        if (this.pendingImages.length === 0) {
+            previewContainer.style.display = 'none'
+            return
+        }
+
+        previewContainer.style.display = 'block'
+
+        // Render each image preview
+        this.pendingImages.forEach((img, index) => {
+            const previewEl = document.createElement('div')
+            previewEl.className = 'image-preview'
+
+            const imgEl = document.createElement('img')
+            imgEl.src = `data:${img.media_type};base64,${img.data}`
+            imgEl.alt = img.filename
+
+            const removeBtn = document.createElement('button')
+            removeBtn.className = 'image-preview-remove'
+            removeBtn.textContent = '×'
+            removeBtn.title = 'Remove image'
+            removeBtn.onclick = () => {
+                this.removeImage(index)
+            }
+
+            previewEl.appendChild(imgEl)
+            previewEl.appendChild(removeBtn)
+            previewsDiv.appendChild(previewEl)
+        })
+    }
+
+    removeImage(index) {
+        this.pendingImages.splice(index, 1)
+        this.renderImagePreviews()
+        console.log(`🗑️ Image removed (${this.pendingImages.length} remaining)`)
     }
 
     setAgentWorking(working) {
@@ -674,6 +850,42 @@ class BassiWebClient {
             </div>
             <div class="message-content">${this.escapeHtml(content)}</div>
         `
+        this.conversationEl.appendChild(messageEl)
+        this.scrollToBottom()
+    }
+
+    addUserMessageWithImages(content, images) {
+        const messageEl = document.createElement('div')
+        messageEl.className = 'user-message message-fade-in'
+
+        // Build message HTML
+        let messageHtml = `
+            <div class="message-header">
+                <span class="user-icon">👤</span>
+                <span class="user-name">You</span>
+            </div>
+        `
+
+        // Add text content if present
+        if (content) {
+            messageHtml += `<div class="message-content">${this.escapeHtml(content)}</div>`
+        }
+
+        // Add images if present
+        if (images && images.length > 0) {
+            messageHtml += '<div class="message-images">'
+            for (const img of images) {
+                messageHtml += `
+                    <img src="data:${img.media_type};base64,${img.data}"
+                         alt="${img.filename}"
+                         class="message-image"
+                         title="${img.filename} (${(img.size / 1024).toFixed(1)} KB)">
+                `
+            }
+            messageHtml += '</div>'
+        }
+
+        messageEl.innerHTML = messageHtml
         this.conversationEl.appendChild(messageEl)
         this.scrollToBottom()
     }

@@ -146,6 +146,51 @@ Enable users to paste images from the clipboard (screenshots, copied images) dir
 - If string: Convert to `[{type: 'text', text: content}]`
 - If array: Use as-is
 
+**Supported Prompt Types:**
+1. **Text-only** (existing behavior, backward compatible):
+   ```json
+   {
+     "type": "user_message",
+     "content": "What is the capital of France?"
+   }
+   ```
+   OR
+   ```json
+   {
+     "type": "user_message",
+     "content": [{"type": "text", "text": "What is the capital of France?"}]
+   }
+   ```
+
+2. **Image-only** (new):
+   ```json
+   {
+     "type": "user_message",
+     "content": [
+       {
+         "type": "image",
+         "source": {"type": "base64", "media_type": "image/png", "data": "..."},
+         "filename": "screenshot.png"
+       }
+     ]
+   }
+   ```
+
+3. **Text + Image(s)** (new):
+   ```json
+   {
+     "type": "user_message",
+     "content": [
+       {"type": "text", "text": "What is in this screenshot?"},
+       {
+         "type": "image",
+         "source": {"type": "base64", "media_type": "image/png", "data": "..."},
+         "filename": "screenshot.png"
+       }
+     ]
+   }
+   ```
+
 ### Frontend Implementation
 
 #### 1. Paste Event Handler
