@@ -47,6 +47,7 @@ class BassiWebClient {
         this.conversationEl = document.getElementById('conversation')
         this.messageInput = document.getElementById('message-input')
         this.sendButton = document.getElementById('send-button')
+        this.stopButton = document.getElementById('stop-button')
         this.verboseLevelSelect = document.getElementById('verbose-level')
         this.statusIndicator = document.getElementById('status-indicator')
         this.connectionStatus = document.getElementById('connection-status')
@@ -75,18 +76,17 @@ class BassiWebClient {
 
         // Setup event listeners
         this.sendButton.addEventListener('click', () => {
-            if (this.isAgentWorking) {
-                this.stopAgent()
-            } else {
-                this.sendMessage()
-            }
+            this.sendMessage()
         })
+
+        this.stopButton.addEventListener('click', () => {
+            this.stopAgent()
+        })
+
         this.messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (!this.isAgentWorking) {
-                    this.sendMessage()
-                }
+                this.sendMessage()
             }
         })
 
@@ -585,17 +585,27 @@ class BassiWebClient {
             return
         }
 
-        // Add user message to UI
-        this.addUserMessage(content)
+        // Determine message type based on agent state
+        const messageType = this.isAgentWorking ? 'hint' : 'user_message'
 
-        // IMPORTANT: Reset currentMessage so NEW assistant message is created at BOTTOM
-        this.currentMessage = null
-        this.blocks.clear()
-        this.textBuffers.clear()
+        // Add to UI with appropriate styling
+        if (messageType === 'hint') {
+            this.addHintMessage(content)
+            // Reset currentMessage so agent's continuation appears BELOW hint
+            this.currentMessage = null
+            this.blocks.clear()
+            this.textBuffers.clear()
+        } else {
+            this.addUserMessage(content)
+            // Reset currentMessage for new conversation
+            this.currentMessage = null
+            this.blocks.clear()
+            this.textBuffers.clear()
+        }
 
         // Send to server
         this.ws.send(JSON.stringify({
-            type: 'user_message',
+            type: messageType,
             content: content
         }))
 
@@ -603,8 +613,11 @@ class BassiWebClient {
         this.messageInput.value = ''
         this.messageInput.style.height = 'auto'
 
-        // Set agent as working and update button
-        this.setAgentWorking(true)
+        // If this was a regular message, set agent working
+        if (messageType === 'user_message') {
+            this.setAgentWorking(true)
+        }
+        // If it was a hint, agent is already working - keep working state
     }
 
     stopAgent() {
@@ -623,18 +636,28 @@ class BassiWebClient {
         this.isAgentWorking = working
 
         if (working) {
-            // Transform to STOP button
-            this.sendButton.textContent = '⏹ Stop'
-            this.sendButton.classList.add('stop-mode')
-            this.messageInput.disabled = true
+            // Agent is working - show stop button, keep everything else simple
+            this.messageInput.disabled = false  // Keep input enabled
+
+            // Show stop button
+            this.stopButton.style.display = 'inline-block'
+
+            // Keep send button enabled for hints
+            this.sendButton.disabled = false
 
             // Show status indicator
             this.showServerStatus('🤖 Claude is thinking...')
         } else {
-            // Transform back to SEND button
-            this.sendButton.textContent = '↑ Send'
-            this.sendButton.classList.remove('stop-mode')
+            // Agent is idle - hide stop button
             this.messageInput.disabled = false
+
+            // Hide stop button
+            this.stopButton.style.display = 'none'
+
+            // Disable send button if no input
+            if (!this.messageInput.value.trim()) {
+                this.sendButton.disabled = true
+            }
 
             // Hide status indicator
             this.hideServerStatus()
@@ -652,6 +675,20 @@ class BassiWebClient {
             <div class="message-content">${this.escapeHtml(content)}</div>
         `
         this.conversationEl.appendChild(messageEl)
+        this.scrollToBottom()
+    }
+
+    addHintMessage(content) {
+        const hintMsg = document.createElement('div')
+        hintMsg.className = 'message hint-message message-fade-in'
+        hintMsg.innerHTML = `
+            <div class="message-header">
+                <span class="hint-icon">💡</span>
+                <span class="hint-label">HINT</span>
+            </div>
+            <div class="message-content">${this.escapeHtml(content)}</div>
+        `
+        this.conversationEl.appendChild(hintMsg)
         this.scrollToBottom()
     }
 
@@ -1768,6 +1805,9 @@ class BassiWebClient {
         // Ready for next message
         this.currentMessage = null
         this.scrollToBottom()
+
+        // Reset UI to idle state
+        this.setAgentWorking(false)
     }
 
     // ========== Usage Handler ==========

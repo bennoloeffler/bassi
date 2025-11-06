@@ -2358,3 +2358,65 @@ details[open] .tools-grid {
 .autocomplete-panel::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* ========== Agent Hints Feature ========== */
+
+/* Button Group */
+.button-group {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* Stop Button (Red) */
+#stop-button {
+    background: var(--accent-red);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#stop-button:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+/* Hint Messages */
+.hint-message {
+    background: var(--bg-secondary);
+    border-left: 4px solid var(--accent-yellow);
+    border-radius: 8px;
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.hint-message .message-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.hint-icon {
+    font-size: 1.25rem;
+}
+
+.hint-label {
+    font-weight: 600;
+    color: var(--accent-yellow);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+.hint-message .message-content {
+    color: var(--text-primary);
+    line-height: 1.6;
+}

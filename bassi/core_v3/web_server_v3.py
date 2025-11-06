@@ -867,6 +867,133 @@ class WebUIServerV3:
                     }
                 )
 
+        elif msg_type == "hint":
+            # User sent a hint while agent is working
+            hint_content = data.get("content", "")
+            logger.info(f"💡 Hint received: {hint_content}")
+
+            try:
+                # Format the hint with special context for Claude
+                formatted_hint = f"""Task was interrupted. Received this hint:
+
+{hint_content}
+
+Now continue with the interrupted task/plan/intention. Go on..."""
+
+                logger.debug(f"Formatted hint: {formatted_hint[:100]}...")
+
+                # Track message ID counter for web UI (same as user_message)
+                message_counter = 0
+                text_block_counter = 0
+                tool_counter = 0
+                current_text_block_id = None
+                tool_id_map = {}  # tool_use_id -> display_id
+
+                # Stream response from agent (same pattern as user_message)
+                async for message in session.query(
+                    prompt=formatted_hint,
+                    session_id=data.get("session_id", "default")
+                ):
+                    # Convert SDK message to WebSocket events (returns list)
+                    events = convert_message_to_websocket(message)
+                    logger.info(
+                        f"   💡 Generated {len(events)} hint events: {[e.get('type') for e in events]}"
+                    )
+
+                    # Enhance events with IDs for web UI (same as user_message)
+                    for event in events:
+                        event_type = event.get("type")
+
+                        if event_type == "text_delta":
+                            # Create or reuse text block ID
+                            if current_text_block_id is None:
+                                current_text_block_id = f"msg-{message_counter}-text-{text_block_counter}"
+                                text_block_counter += 1
+                            event["id"] = current_text_block_id
+
+                        elif event_type == "tool_start":
+                            # Create tool block ID
+                            tool_use_id = event.get("id")  # Agent SDK's tool_use_id
+                            display_id = f"msg-{message_counter}-tool-{tool_counter}"
+                            tool_counter += 1
+                            tool_id_map[tool_use_id] = display_id
+                            event["id"] = display_id
+                            logger.info(
+                                f"🛠️ tool_start - tool_use_id: {tool_use_id} → display_id: {display_id}"
+                            )
+                            # Reset text block so next text starts new block
+                            current_text_block_id = None
+
+                        elif event_type == "tool_end":
+                            # Map Agent SDK tool_use_id to our display ID
+                            tool_use_id = event.get("id")
+                            logger.info(
+                                f"🔧 tool_end - tool_use_id: {tool_use_id}, tool_id_map: {tool_id_map}"
+                            )
+                            display_id = tool_id_map.get(tool_use_id)
+                            if display_id:
+                                event["id"] = display_id
+                                logger.info(f"✅ Mapped to display_id: {display_id}")
+                            else:
+                                logger.warning(
+                                    f"❌ No display ID for tool_use_id: {tool_use_id}"
+                                )
+
+                        elif event_type == "thinking":
+                            # Create thinking block ID
+                            thinking_id = f"msg-{message_counter}-thinking-0"
+                            event["id"] = thinking_id
+
+                        elif event_type == "system":
+                            # Handle system message filtering
+                            subtype = event.get("subtype", "")
+
+                            # Skip 'init' system messages
+                            if subtype == "init":
+                                logger.debug(
+                                    f"⏩ Skipping 'init' system message (metadata only)"
+                                )
+                                continue
+
+                            # Add user-friendly message for compaction
+                            if "compact" in subtype.lower():
+                                event["content"] = (
+                                    "⚡ **Auto-Compaction Started**\n\n"
+                                    "The Claude Agent SDK is automatically summarizing older parts of the conversation "
+                                    "to make room for new interactions. This preserves recent code modifications, "
+                                    "current objectives, and project structure.\n\n"
+                                    "_Compaction happens automatically when context approaches ~95% capacity._"
+                                )
+                                logger.info(f"📦 Compaction event: {subtype}")
+
+                            # Skip system messages without content
+                            else:
+                                has_content = any(
+                                    key in event and event[key]
+                                    for key in ["content", "message", "text"]
+                                )
+                                if not has_content:
+                                    logger.debug(
+                                        f"⏩ Skipping system message without content: subtype={subtype}"
+                                    )
+                                    continue
+
+                        # Send event to client
+                        await websocket.send_json(event)
+
+                # ✅ Send completion signal when hint processing finishes
+                await websocket.send_json({"type": "message_complete"})
+                logger.info("✅ Hint processed successfully")
+
+            except Exception as e:
+                logger.error(f"❌ Error processing hint: {e}", exc_info=True)
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Failed to process hint: {str(e)}",
+                    }
+                )
+
         elif msg_type == "get_server_info":
             # User requested server info (commands, MCP tools, agents, etc.)
             logger.info("Server info request received")
