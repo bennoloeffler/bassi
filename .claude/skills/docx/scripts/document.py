@@ -135,7 +135,10 @@ class DocxXMLEditor(XMLEditor):
             """Check if element is inside a w:del element."""
             parent = elem.parentNode
             while parent:
-                if parent.nodeType == parent.ELEMENT_NODE and parent.tagName == "w:del":
+                if (
+                    parent.nodeType == parent.ELEMENT_NODE
+                    and parent.tagName == "w:del"
+                ):
                     return True
                 parent = parent.parentNode
             return False
@@ -398,7 +401,9 @@ class DocxXMLEditor(XMLEditor):
                 new_run = run.cloneNode(True)
 
                 # Convert w:delText → w:t
-                for del_text in list(new_run.getElementsByTagName("w:delText")):
+                for del_text in list(
+                    new_run.getElementsByTagName("w:delText")
+                ):
                     t_elem = self.dom.createElement("w:t")
                     # Copy ALL child nodes (not just firstChild) to handle entities
                     while del_text.firstChild:
@@ -410,7 +415,9 @@ class DocxXMLEditor(XMLEditor):
 
                 # Update run attributes: w:rsidDel → w:rsidR
                 if new_run.hasAttribute("w:rsidDel"):
-                    new_run.setAttribute("w:rsidR", new_run.getAttribute("w:rsidDel"))
+                    new_run.setAttribute(
+                        "w:rsidR", new_run.getAttribute("w:rsidDel")
+                    )
                     new_run.removeAttribute("w:rsidDel")
                 elif not new_run.hasAttribute("w:rsidR"):
                     new_run.setAttribute("w:rsidR", self.rsid)
@@ -450,9 +457,11 @@ class DocxXMLEditor(XMLEditor):
         pPr_list = para.getElementsByTagName("w:pPr")
         if not pPr_list:
             pPr = doc.createElement("w:pPr")
-            para.insertBefore(
-                pPr, para.firstChild
-            ) if para.firstChild else para.appendChild(pPr)
+            (
+                para.insertBefore(pPr, para.firstChild)
+                if para.firstChild
+                else para.appendChild(pPr)
+            )
         else:
             pPr = pPr_list[0]
 
@@ -466,9 +475,11 @@ class DocxXMLEditor(XMLEditor):
 
         # Add <w:ins/> to w:rPr
         ins_marker = doc.createElement("w:ins")
-        rPr.insertBefore(
-            ins_marker, rPr.firstChild
-        ) if rPr.firstChild else rPr.appendChild(ins_marker)
+        (
+            rPr.insertBefore(ins_marker, rPr.firstChild)
+            if rPr.firstChild
+            else rPr.appendChild(ins_marker)
+        )
 
         # Wrap all non-pPr children in <w:ins>
         ins_wrapper = doc.createElement("w:ins")
@@ -533,12 +544,18 @@ class DocxXMLEditor(XMLEditor):
 
         elif elem.nodeName == "w:p":
             # Check for existing tracked changes
-            if elem.getElementsByTagName("w:ins") or elem.getElementsByTagName("w:del"):
-                raise ValueError("w:p element already contains tracked changes")
+            if elem.getElementsByTagName(
+                "w:ins"
+            ) or elem.getElementsByTagName("w:del"):
+                raise ValueError(
+                    "w:p element already contains tracked changes"
+                )
 
             # Check if it's a numbered list item
             pPr_list = elem.getElementsByTagName("w:pPr")
-            is_numbered = pPr_list and pPr_list[0].getElementsByTagName("w:numPr")
+            is_numbered = pPr_list and pPr_list[0].getElementsByTagName(
+                "w:numPr"
+            )
 
             if is_numbered:
                 # Add <w:del/> to w:rPr in w:pPr
@@ -553,9 +570,11 @@ class DocxXMLEditor(XMLEditor):
 
                 # Add <w:del/> marker
                 del_marker = self.dom.createElement("w:del")
-                rPr.insertBefore(
-                    del_marker, rPr.firstChild
-                ) if rPr.firstChild else rPr.appendChild(del_marker)
+                (
+                    rPr.insertBefore(del_marker, rPr.firstChild)
+                    if rPr.firstChild
+                    else rPr.appendChild(del_marker)
+                )
 
             # Convert w:t → w:delText in all runs
             for t_elem in list(elem.getElementsByTagName("w:t")):
@@ -579,7 +598,9 @@ class DocxXMLEditor(XMLEditor):
 
             # Wrap all non-pPr children in <w:del>
             del_wrapper = self.dom.createElement("w:del")
-            for child in [c for c in elem.childNodes if c.nodeName != "w:pPr"]:
+            for child in [
+                c for c in elem.childNodes if c.nodeName != "w:pPr"
+            ]:
                 elem.removeChild(child)
                 del_wrapper.appendChild(child)
             elem.appendChild(del_wrapper)
@@ -590,7 +611,9 @@ class DocxXMLEditor(XMLEditor):
             return elem
 
         else:
-            raise ValueError(f"Element must be w:r or w:p, got {elem.nodeName}")
+            raise ValueError(
+                f"Element must be w:r or w:p, got {elem.nodeName}"
+            )
 
 
 def _generate_hex_id() -> str:
@@ -662,7 +685,9 @@ class Document:
         self.comments_path = self.word_path / "comments.xml"
         self.comments_extended_path = self.word_path / "commentsExtended.xml"
         self.comments_ids_path = self.word_path / "commentsIds.xml"
-        self.comments_extensible_path = self.word_path / "commentsExtensible.xml"
+        self.comments_extensible_path = (
+            self.word_path / "commentsExtensible.xml"
+        )
 
         # Load existing comments and determine next ID (before setup modifies files)
         self.existing_comments = self._load_existing_comments()
@@ -706,7 +731,10 @@ class Document:
                 raise ValueError(f"XML file not found: {xml_path}")
             # Use DocxXMLEditor with RSID, author, and initials for all editors
             self._editors[xml_path] = DocxXMLEditor(
-                file_path, rsid=self.rsid, author=self.author, initials=self.initials
+                file_path,
+                rsid=self.rsid,
+                author=self.author,
+                initials=self.initials,
             )
         return self._editors[xml_path]
 
@@ -733,14 +761,20 @@ class Document:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Add comment ranges to document.xml immediately
-        self._document.insert_before(start, self._comment_range_start_xml(comment_id))
+        self._document.insert_before(
+            start, self._comment_range_start_xml(comment_id)
+        )
 
         # If end node is a paragraph, append comment markup inside it
         # Otherwise insert after it (for run-level anchors)
         if end.tagName == "w:p":
-            self._document.append_to(end, self._comment_range_end_xml(comment_id))
+            self._document.append_to(
+                end, self._comment_range_end_xml(comment_id)
+            )
         else:
-            self._document.insert_after(end, self._comment_range_end_xml(comment_id))
+            self._document.insert_after(
+                end, self._comment_range_end_xml(comment_id)
+            )
 
         # Add to comments.xml immediately
         self._add_to_comments_xml(
@@ -781,7 +815,9 @@ class Document:
             cm.reply_to_comment(parent_comment_id=0, text="I agree with this change")
         """
         if parent_comment_id not in self.existing_comments:
-            raise ValueError(f"Parent comment with id={parent_comment_id} not found")
+            raise ValueError(
+                f"Parent comment with id={parent_comment_id} not found"
+            )
 
         parent_info = self.existing_comments[parent_comment_id]
         comment_id = self.next_comment_id
@@ -941,7 +977,9 @@ class Document:
         self._update_people_xml(people_file)
 
         # Update XML files
-        self._add_content_type_for_people(self.unpacked_path / "[Content_Types].xml")
+        self._add_content_type_for_people(
+            self.unpacked_path / "[Content_Types].xml"
+        )
         self._add_relationship_for_people(
             self.word_path / "_rels" / "document.xml.rels"
         )
@@ -1004,14 +1042,19 @@ class Document:
         if track_revisions:
             track_revisions_exists = any(
                 elem.tagName == f"{prefix}:trackRevisions"
-                for elem in editor.dom.getElementsByTagName(f"{prefix}:trackRevisions")
+                for elem in editor.dom.getElementsByTagName(
+                    f"{prefix}:trackRevisions"
+                )
             )
 
             if not track_revisions_exists:
                 track_rev_xml = f"<{prefix}:trackRevisions/>"
                 # Try to insert before documentProtection, defaultTabStop, or at start
                 inserted = False
-                for tag in [f"{prefix}:documentProtection", f"{prefix}:defaultTabStop"]:
+                for tag in [
+                    f"{prefix}:documentProtection",
+                    f"{prefix}:defaultTabStop",
+                ]:
                     elements = editor.dom.getElementsByTagName(tag)
                     if elements:
                         editor.insert_before(elements[0], track_rev_xml)
@@ -1029,14 +1072,16 @@ class Document:
 
         if not rsids_elements:
             # Add new rsids section
-            rsids_xml = f'''<{prefix}:rsids>
+            rsids_xml = f"""<{prefix}:rsids>
   <{prefix}:rsidRoot {prefix}:val="{self.rsid}"/>
   <{prefix}:rsid {prefix}:val="{self.rsid}"/>
-</{prefix}:rsids>'''
+</{prefix}:rsids>"""
 
             # Try to insert after compat, before clrSchemeMapping, or before closing tag
             inserted = False
-            compat_elements = editor.dom.getElementsByTagName(f"{prefix}:compat")
+            compat_elements = editor.dom.getElementsByTagName(
+                f"{prefix}:compat"
+            )
             if compat_elements:
                 editor.insert_after(compat_elements[0], rsids_xml)
                 inserted = True
@@ -1076,23 +1121,26 @@ class Document:
         root = editor.get_node(tag="w:comments")
 
         escaped_text = (
-            text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
         )
         # Note: w:rsidR, w:rsidRDefault, w:rsidP on w:p, w:rsidR on w:r,
         # and w:author, w:date, w:initials on w:comment are automatically added by DocxXMLEditor
-        comment_xml = f'''<w:comment w:id="{comment_id}">
+        comment_xml = f"""<w:comment w:id="{comment_id}">
   <w:p w14:paraId="{para_id}" w14:textId="77777777">
     <w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>
     <w:r><w:rPr><w:color w:val="000000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>{escaped_text}</w:t></w:r>
   </w:p>
-</w:comment>'''
+</w:comment>"""
         editor.append_to(root, comment_xml)
 
     def _add_to_comments_extended_xml(self, para_id, parent_para_id):
         """Add a single comment to commentsExtended.xml."""
         if not self.comments_extended_path.exists():
             shutil.copy(
-                TEMPLATE_DIR / "commentsExtended.xml", self.comments_extended_path
+                TEMPLATE_DIR / "commentsExtended.xml",
+                self.comments_extended_path,
             )
 
         editor = self["word/commentsExtended.xml"]
@@ -1107,7 +1155,9 @@ class Document:
     def _add_to_comments_ids_xml(self, para_id, durable_id):
         """Add a single comment to commentsIds.xml."""
         if not self.comments_ids_path.exists():
-            shutil.copy(TEMPLATE_DIR / "commentsIds.xml", self.comments_ids_path)
+            shutil.copy(
+                TEMPLATE_DIR / "commentsIds.xml", self.comments_ids_path
+            )
 
         editor = self["word/commentsIds.xml"]
         root = editor.get_node(tag="w16cid:commentsIds")
@@ -1119,7 +1169,8 @@ class Document:
         """Add a single comment to commentsExtensible.xml."""
         if not self.comments_extensible_path.exists():
             shutil.copy(
-                TEMPLATE_DIR / "commentsExtensible.xml", self.comments_extensible_path
+                TEMPLATE_DIR / "commentsExtensible.xml",
+                self.comments_extensible_path,
             )
 
         editor = self["word/commentsExtensible.xml"]
@@ -1139,21 +1190,21 @@ class Document:
 
         Note: w:rsidR is automatically added by DocxXMLEditor.
         """
-        return f'''<w:commentRangeEnd w:id="{comment_id}"/>
+        return f"""<w:commentRangeEnd w:id="{comment_id}"/>
 <w:r>
   <w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>
   <w:commentReference w:id="{comment_id}"/>
-</w:r>'''
+</w:r>"""
 
     def _comment_ref_run_xml(self, comment_id):
         """Generate XML for comment reference run.
 
         Note: w:rsidR is automatically added by DocxXMLEditor.
         """
-        return f'''<w:r>
+        return f"""<w:r>
   <w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>
   <w:commentReference w:id="{comment_id}"/>
-</w:r>'''
+</w:r>"""
 
     # ==================== Private: Metadata Updates ====================
 
@@ -1195,9 +1246,9 @@ class Document:
 
         # Add author with proper XML escaping to prevent injection
         escaped_author = html.escape(author, quote=True)
-        person_xml = f'''<w15:person w15:author="{escaped_author}">
+        person_xml = f"""<w15:person w15:author="{escaped_author}">
   <w15:presenceInfo w15:providerId="None" w15:userId="{escaped_author}"/>
-</w15:person>'''
+</w15:person>"""
         editor.append_to(root, person_xml)
 
     def _ensure_comment_relationships(self):
@@ -1270,7 +1321,5 @@ class Document:
         ]
 
         for part_name, content_type in overrides:
-            override_xml = (
-                f'<Override PartName="{part_name}" ContentType="{content_type}"/>'
-            )
+            override_xml = f'<Override PartName="{part_name}" ContentType="{content_type}"/>'
             editor.append_to(root, override_xml)

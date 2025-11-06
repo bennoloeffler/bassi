@@ -166,7 +166,9 @@ class XMLEditor:
             if contains:
                 hint = "Text may be split across elements or use different wording."
             elif line_number:
-                hint = "Line numbers may have changed if document was modified."
+                hint = (
+                    "Line numbers may have changed if document was modified."
+                )
             elif attrs:
                 hint = "Verify attribute values are correct."
             else:

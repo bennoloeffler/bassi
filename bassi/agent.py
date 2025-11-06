@@ -456,17 +456,6 @@ Available operations:
             if self.status_callback:
                 self.status_callback("⚠️ Interrupted")
 
-    async def cleanup(self) -> None:
-        """Clean up agent resources (for session isolation)"""
-        try:
-            if self.client:
-                logger.info("Cleaning up agent client")
-                await self.client.__aexit__(None, None, None)
-                self.client = None
-            logger.info("Agent cleanup completed")
-        except Exception as e:
-            logger.error(f"Error during agent cleanup: {e}")
-
     def save_context(self) -> None:
         """Save current context to file"""
         try:

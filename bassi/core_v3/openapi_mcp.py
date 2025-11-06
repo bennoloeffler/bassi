@@ -28,7 +28,6 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
 
 from fastmcp import FastMCP
 
@@ -103,7 +102,9 @@ async def create_mcp_from_openapi(
         openapi_spec = response.json()
 
     # Create httpx client with auth headers
-    client = httpx.AsyncClient(headers=headers if headers else None, timeout=30.0)
+    client = httpx.AsyncClient(
+        headers=headers if headers else None, timeout=30.0
+    )
 
     # Use FastMCP's built-in from_openapi() method
     mcp = FastMCP.from_openapi(
@@ -112,12 +113,16 @@ async def create_mcp_from_openapi(
         name=name,
     )
 
-    logger.info(f"✅ Created FastMCP server '{name}' using FastMCP.from_openapi()")
+    logger.info(
+        f"✅ Created FastMCP server '{name}' using FastMCP.from_openapi()"
+    )
 
     return mcp
 
 
-async def load_mcp_servers_from_config(config_file: str) -> dict[str, FastMCP]:
+async def load_mcp_servers_from_config(
+    config_file: str,
+) -> dict[str, FastMCP]:
     """
     Load MCP servers from .api.json configuration file.
 
@@ -173,14 +178,18 @@ async def load_mcp_servers_from_config(config_file: str) -> dict[str, FastMCP]:
     def expand_env_vars(obj):
         """Recursively expand ${VAR} in strings"""
         if isinstance(obj, str):
+
             def replacer(match):
                 var_name = match.group(1)
                 value = os.getenv(var_name)
                 if value is None:
-                    logger.warning(f"Environment variable ${{{var_name}}} not set")
+                    logger.warning(
+                        f"Environment variable ${{{var_name}}} not set"
+                    )
                     return match.group(0)  # Return original ${VAR}
                 return value
-            return re.sub(r'\$\{(\w+)\}', replacer, obj)
+
+            return re.sub(r"\$\{(\w+)\}", replacer, obj)
         elif isinstance(obj, dict):
             return {k: expand_env_vars(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -202,13 +211,18 @@ async def load_mcp_servers_from_config(config_file: str) -> dict[str, FastMCP]:
                 openapi_url=server_config["openapi_url"],
                 auth_token=server_config.get("auth_token"),
                 api_key=server_config.get("api_key"),
-                api_key_header=server_config.get("api_key_header", "X-API-Key"),
+                api_key_header=server_config.get(
+                    "api_key_header", "X-API-Key"
+                ),
             )
 
             mcp_servers[server_name] = server
             logger.info(f"✅ Loaded MCP server: {server_name}")
 
         except Exception as e:
-            logger.error(f"❌ Failed to load MCP server '{server_name}': {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to load MCP server '{server_name}': {e}",
+                exc_info=True,
+            )
 
     return mcp_servers

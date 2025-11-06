@@ -167,7 +167,9 @@ def rearrange_presentation(template_path, output_path, slide_sequence):
     # Validate indices
     for idx in slide_sequence:
         if idx < 0 or idx >= total_slides:
-            raise ValueError(f"Slide index {idx} out of range (0-{total_slides - 1})")
+            raise ValueError(
+                f"Slide index {idx} out of range (0-{total_slides - 1})"
+            )
 
     # Track original slides and their duplicates
     slide_map = []  # List of actual slide indices for final presentation
@@ -180,7 +182,10 @@ def rearrange_presentation(template_path, output_path, slide_sequence):
             # Already duplicated this slide, use the duplicate
             slide_map.append(duplicated[template_idx].pop(0))
             print(f"  [{i}] Using duplicate of slide {template_idx}")
-        elif slide_sequence.count(template_idx) > 1 and template_idx not in duplicated:
+        elif (
+            slide_sequence.count(template_idx) > 1
+            and template_idx not in duplicated
+        ):
             # First occurrence of a repeated slide - create duplicates
             slide_map.append(template_idx)
             duplicates = []
@@ -199,7 +204,9 @@ def rearrange_presentation(template_path, output_path, slide_sequence):
 
     # Step 2: DELETE unwanted slides (work backwards)
     slides_to_keep = set(slide_map)
-    print(f"\nDeleting {len(prs.slides) - len(slides_to_keep)} unused slides...")
+    print(
+        f"\nDeleting {len(prs.slides) - len(slides_to_keep)} unused slides..."
+    )
     for i in range(len(prs.slides) - 1, -1, -1):
         if i not in slides_to_keep:
             delete_slide(prs, i)
@@ -217,7 +224,9 @@ def rearrange_presentation(template_path, output_path, slide_sequence):
             for i in range(len(slide_map)):
                 if slide_map[i] > current_pos and slide_map[i] <= target_pos:
                     slide_map[i] -= 1
-                elif slide_map[i] < current_pos and slide_map[i] >= target_pos:
+                elif (
+                    slide_map[i] < current_pos and slide_map[i] >= target_pos
+                ):
                     slide_map[i] += 1
             slide_map[target_pos] = target_pos
 

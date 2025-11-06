@@ -24,7 +24,9 @@ class RedliningValidator:
         # Verify unpacked directory exists and has correct structure
         modified_file = self.unpacked_dir / "word" / "document.xml"
         if not modified_file.exists():
-            print(f"FAILED - Modified document.xml not found at {modified_file}")
+            print(
+                f"FAILED - Modified document.xml not found at {modified_file}"
+            )
             return False
 
         # First, check if there are any tracked changes by Claude to validate
@@ -132,7 +134,9 @@ class RedliningValidator:
         if git_diff:
             error_parts.extend(["Differences:", "============", git_diff])
         else:
-            error_parts.append("Unable to generate word diff (git not available)")
+            error_parts.append(
+                "Unable to generate word diff (git not available)"
+            )
 
         return "\n".join(error_parts)
 
@@ -224,7 +228,10 @@ class RedliningValidator:
         for parent in root.iter():
             to_remove = []
             for child in parent:
-                if child.tag == ins_tag and child.get(author_attr) == "Claude":
+                if (
+                    child.tag == ins_tag
+                    and child.get(author_attr) == "Claude"
+                ):
                     to_remove.append(child)
             for elem in to_remove:
                 parent.remove(elem)
@@ -236,7 +243,10 @@ class RedliningValidator:
         for parent in root.iter():
             to_process = []
             for child in parent:
-                if child.tag == del_tag and child.get(author_attr) == "Claude":
+                if (
+                    child.tag == del_tag
+                    and child.get(author_attr) == "Claude"
+                ):
                     to_process.append((child, list(parent).index(child)))
 
             # Process in reverse order to maintain indices

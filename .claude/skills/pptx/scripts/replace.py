@@ -140,7 +140,9 @@ def apply_font_properties(run, para_data: Dict[str, Any]):
             print(f"  WARNING: Unknown theme color name '{theme_name}'")
 
 
-def detect_frame_overflow(inventory: InventoryData) -> Dict[str, Dict[str, float]]:
+def detect_frame_overflow(
+    inventory: InventoryData,
+) -> Dict[str, Dict[str, float]]:
     """Detect text overflow in shapes (text exceeding shape bounds).
 
     Returns dict of slide_key -> shape_key -> overflow_inches.
@@ -154,12 +156,16 @@ def detect_frame_overflow(inventory: InventoryData) -> Dict[str, Dict[str, float
             if shape_data.frame_overflow_bottom is not None:
                 if slide_key not in overflow_map:
                     overflow_map[slide_key] = {}
-                overflow_map[slide_key][shape_key] = shape_data.frame_overflow_bottom
+                overflow_map[slide_key][
+                    shape_key
+                ] = shape_data.frame_overflow_bottom
 
     return overflow_map
 
 
-def validate_replacements(inventory: InventoryData, replacements: Dict) -> List[str]:
+def validate_replacements(
+    inventory: InventoryData, replacements: Dict
+) -> List[str]:
     """Validate that all shapes in replacements exist in inventory.
 
     Returns list of error messages.
@@ -189,7 +195,9 @@ def validate_replacements(inventory: InventoryData, replacements: Dict) -> List[
                             first_text = paragraphs[0].text[:50]
                             if len(paragraphs[0].text) > 50:
                                 first_text += "..."
-                            unused_with_content.append(f"{k} ('{first_text}')")
+                            unused_with_content.append(
+                                f"{k} ('{first_text}')"
+                            )
                         else:
                             unused_with_content.append(k)
 
@@ -234,7 +242,9 @@ def apply_replacements(pptx_file: str, json_file: str, output_file: str):
         print("ERROR: Invalid shapes in replacement JSON:")
         for error in errors:
             print(f"  - {error}")
-        print("\nPlease check the inventory and update your replacement JSON.")
+        print(
+            "\nPlease check the inventory and update your replacement JSON."
+        )
         print(
             "You can regenerate the inventory with: python inventory.py <input.pptx> <output.json>"
         )
@@ -273,14 +283,18 @@ def apply_replacements(pptx_file: str, json_file: str, output_file: str):
             shapes_cleared += 1
 
             # Check for replacement paragraphs
-            replacement_shape_data = replacements.get(slide_key, {}).get(shape_key, {})
+            replacement_shape_data = replacements.get(slide_key, {}).get(
+                shape_key, {}
+            )
             if "paragraphs" not in replacement_shape_data:
                 continue
 
             shapes_replaced += 1
 
             # Add replacement paragraphs
-            for i, para_data in enumerate(replacement_shape_data["paragraphs"]):
+            for i, para_data in enumerate(
+                replacement_shape_data["paragraphs"]
+            ):
                 if i == 0:
                     p = text_frame.paragraphs[0]  # type: ignore
                 else:
@@ -308,7 +322,9 @@ def apply_replacements(pptx_file: str, json_file: str, output_file: str):
     for slide_key, shape_overflows in updated_overflow.items():
         for shape_key, new_overflow in shape_overflows.items():
             # Get original overflow (0 if there was no overflow before)
-            original = original_overflow.get(slide_key, {}).get(shape_key, 0.0)
+            original = original_overflow.get(slide_key, {}).get(
+                shape_key, 0.0
+            )
 
             # Error if overflow increased
             if new_overflow > original + 0.01:  # Small tolerance for rounding
@@ -368,11 +384,15 @@ def main():
         sys.exit(1)
 
     if not replacements_json.exists():
-        print(f"Error: Replacements JSON file '{replacements_json}' not found")
+        print(
+            f"Error: Replacements JSON file '{replacements_json}' not found"
+        )
         sys.exit(1)
 
     try:
-        apply_replacements(str(input_pptx), str(replacements_json), str(output_pptx))
+        apply_replacements(
+            str(input_pptx), str(replacements_json), str(output_pptx)
+        )
     except Exception as e:
         print(f"Error applying replacements: {e}")
         import traceback

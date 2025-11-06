@@ -2,18 +2,58 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Architecture Overview: Dual-Mode System
+
+bassi has **TWO separate systems** that serve different purposes:
+
+### V1: CLI-Focused (Production)
+- **Entry Point**: `bassi` command
+- **Agent**: `bassi/agent.py` (1039 lines)
+- **Purpose**: Interactive command-line assistant with Rich console
+- **Features**: CLI dialog, keyboard bindings, session persistence, optional web UI
+- **Tests**: `tests/` (15+ tests)
+
+### V3: Web-Focused (Experimental)
+- **Entry Point**: `bassi-web` command
+- **Agent**: `bassi/core_v3/agent_session.py` (275 lines)
+- **Purpose**: Pure web UI with hot reload
+- **Features**: WebSocket streaming, interactive questions, startup discovery
+- **Tests**: `bassi/core_v3/tests/` (37 tests)
+
+**Key Point**: Both use Claude Agent SDK, but V1 is feature-rich for CLI, V3 is simpler for web-only.
+
+---
+
 ## Important Documentation Files
-- **Vision**: `docs/vision.md` - what to achive
-- **Design**: `docs/design.md` - User stories, software structure and philosophy
-- **Technical Requirements**: `docs/requirements.md` - Tech stack, data models, and security requirements
+- **Vision**: `docs/vision.md` - Iteration roadmap (what to achieve)
+- **Design**: `docs/design.md` - User stories, software structure, philosophy
+- **Technical Requirements**: `docs/requirements.md` - Tech stack, data models, security
+- **Dual Mode**: `docs/DUAL_MODE_IMPLEMENTATION.md` - V1/V3 architecture details
+- **Black Box Design**: `CLAUDE_BBS.md` - Design principles (read when architecting)
 
 ## Key Features Documentation
 Features are described in `docs/features_concepts/<feature_name>.md`
 E.g.:
 - **Permissions**: `docs/features_concepts/permissions.md` - Permission model and autonomous operation
 - **O365 Authentication**: `docs/features_concepts/o365_authentication.md` - Microsoft 365 authentication and token caching
+- **Interactive Questions**: `docs/features_concepts/interactive_questions.md` - V3 user input during execution
+- **Startup Discovery**: `docs/features_concepts/startup_discovery.md` - V3 environment detection
 
 ## Project Directory Structure
+
+### Core Code
+- **`bassi/main.py`** - V1 CLI entry point (660 lines)
+- **`bassi/agent.py`** - V1 agent with Rich console (1039 lines)
+- **`bassi/config.py`** - Shared configuration
+- **`bassi/mcp_servers/`** - Built-in MCP servers (bash, web search, task automation)
+- **`bassi/core_v3/`** - V3 web-only architecture
+  - `cli.py` - V3 entry point
+  - `agent_session.py` - V3 agent (275 lines, thin SDK wrapper)
+  - `web_server_v3.py` - V3 web server (730 lines)
+  - `message_converter.py` - SDK message conversion
+  - `tools.py` - Interactive questions
+  - `discovery.py` - Startup discovery
+  - `tests/` - V3 test suite (37 tests)
 
 ### Agent Working Folders
 - **`_DATA_FROM_USER/`** - User-provided files (images, PDFs, documents)
@@ -54,20 +94,73 @@ you may find all the hints you need.
 
 ## Development Commands
 
+### Running bassi
+
 ```bash
+# V3 Web UI (recommended for development)
+./run-agent-web.sh       # Web UI with hot reload (logs to /tmp/bassi-web.log)
+bassi-web                # Web UI command (hot reload enabled)
 
-./run-agent.sh # writes logs to stdio and to server.log
+# V1 CLI
+./run-agent-cli.sh       # CLI with hot reload (restarts on file changes)
+bassi                    # CLI command (no reload)
+bassi --web              # CLI + legacy V1 web UI (deprecated)
 
-# Run all python tests
-uv run pytest
+# Hot Reload Features:
+# - run-agent-web.sh: Backend auto-restarts in 2-3 sec, F5 to reload browser
+# - run-agent-cli.sh: CLI restarts on Python file changes (loses session)
+# - Both require 'watchfiles' package (already installed)
+```
 
-# Run comprehensive quality checks (formatting, linting, type checking, tests)
-./check.sh
+### Testing
 
-# For debugging: claude will be able to read server logs
-# in file server.log with command
+```bash
+# Run all tests (V1 + V3)
+uv run pytest            # 52+ tests total
+
+# Run specific test suite
+uv run pytest tests/                    # V1 tests only (15+ tests)
+uv run pytest bassi/core_v3/tests/      # V3 tests only (37 tests)
+
+# Run specific test file
+uv run pytest tests/test_agent.py
+uv run pytest bassi/core_v3/tests/test_agent_session.py
+
+# Run single test
+uv run pytest tests/test_agent.py::test_agent_initialization -v
+
+# Run with coverage
+uv run pytest --cov=bassi
+
+# Watch mode (auto-rerun on changes)
+uv run pytest-watch
+```
+
+### Quality Checks
+
+```bash
+# Complete QA pipeline (ALWAYS run before committing)
+./check.sh               # Runs: black → ruff → mypy → pytest (all tests)
+
+# Individual checks
+uv run black .           # Format code (78 char lines)
+uv run ruff check --fix . # Lint with auto-fix
+uv run mypy bassi/       # Type checking
+```
+
+### Debugging
+
+```bash
+# Read server logs (V3 web server)
 tail -n 300 server.log
+tail -f server.log       # Follow in real-time
 
+# View debug logs
+BASSI_DEBUG=1 bassi-web
+
+# Check V3 hot reload
+# - Backend: Edit Python file → server auto-restarts (2-3 sec)
+# - Browser: Edit static files → press F5 to reload (instant)
 ```
 
 ### Package Management
@@ -76,17 +169,106 @@ tail -n 300 server.log
 - Use `uv remove <package>` to remove packages
 - **NEVER** use pip directly - always use uv
 
-### Quality Assurance Pipeline
-```bash
-# Complete development pipeline (runs in this order):
-./check.sh  # Executes:
-1. uv run black .          # Code formatting
-2. ruff check --fix .      # Linting with auto-fix
-3. mypy .                 # Type checking
-4. uv run pytest          # All tests
+## High-Level Architecture
 
-# Always run ./check.sh before committing changes
+### Message Flow (V3 Web UI)
+```
+Browser (WebSocket)
+    ↕ WebSocket events (JSON)
+FastAPI Web Server (bassi/core_v3/web_server_v3.py)
+    ↕ SDK messages
+Message Converter (bassi/core_v3/message_converter.py)
+    ↕ StreamEvent objects
+Agent Session (bassi/core_v3/agent_session.py)
+    ↕ Claude Agent SDK client
+Claude Agent SDK
+    ↕ Anthropic API
+Claude Sonnet 4.5
 ```
 
-## Project Structure
-see README.md
+### Key Architectural Patterns
+
+1. **Black Box Design** (see CLAUDE_BBS.md)
+   - Modules are replaceable through clean interfaces
+   - Implementation details hidden behind APIs
+   - Focus on "what" not "how"
+
+2. **Dual System Separation**
+   - V1: Full-featured CLI with Rich console (production)
+   - V3: Simpler web-only with WebSocket streaming (experimental)
+   - Shared: Config, MCP servers
+
+3. **Message Conversion** (V3 only)
+   - SDK → WebSocket: `convert_sdk_message_to_event()`
+   - WebSocket → SDK: Direct JSON to SDK objects
+   - Handles streaming, tool calls, questions
+
+4. **Session Isolation** (V3)
+   - Each WebSocket = separate agent instance
+   - No shared state between connections
+   - Clean lifecycle management
+
+5. **Context Management** (V1)
+   - Auto-save to `.bassi_context.json`
+   - Session resumption via `session_id`
+   - Auto-compaction at 75% of 200K token window
+
+### MCP Server Integration
+
+Both V1 and V3 use:
+- **Built-in**: bash, web_search, task_automation (in `bassi/mcp_servers/`)
+- **External**: ms365, playwright, postgresql (via `.mcp.json`)
+
+MCP servers are launched automatically by the agent on first use.
+
+### Hot Reload (V3 Only)
+
+- **Backend**: Uvicorn watches `.py` files → auto-restart (2-3 sec)
+- **Browser**: Cache-control headers → F5 reloads instantly
+- See `docs/HOT_RELOAD_V3.md` for details
+
+## Common Development Patterns
+
+### Adding a New Feature
+
+1. **Document first**: Create `docs/features_concepts/<feature_name>.md`
+2. **Write tests**: Test-driven development (see existing test files)
+3. **Implement**: Follow Black Box Design principles (CLAUDE_BBS.md)
+4. **Quality check**: Run `./check.sh` before committing
+5. **Update docs**: Keep documentation in sync with code
+
+### Working with V1 vs V3
+
+**V1 (CLI)**:
+- Edit `bassi/agent.py` or `bassi/main.py`
+- Rich console output, keyboard bindings
+- Test with `uv run pytest tests/`
+- Run with `bassi` command
+
+**V3 (Web)**:
+- Edit `bassi/core_v3/` files
+- WebSocket streaming, interactive questions
+- Test with `uv run pytest bassi/core_v3/tests/`
+- Run with `bassi-web` command
+
+### Testing Best Practices
+
+- **Unit tests**: Test individual functions/methods
+- **Integration tests**: Test MCP servers, API calls (mark with `@pytest.mark.integration`)
+- **Async tests**: Use `@pytest.mark.asyncio` for async functions
+- **Fixtures**: Reuse setup via `tests/conftest.py`
+
+## Critical Configuration Files
+
+- **`pyproject.toml`**: Dependencies, pytest config, tool settings
+  - `testpaths = ["tests", "bassi/core_v3/tests"]` ← both test suites
+  - `[project.scripts]` defines `bassi` and `bassi-web` commands
+- **`.mcp.json`**: External MCP server configuration
+- **`.env`**: API keys (NEVER commit, use `.env.example`)
+- **`.bassi_context.json`**: V1 session state (auto-generated)
+
+## Error Handling Notes
+
+- **V1**: Rich console error formatting, graceful interruption (Ctrl+C)
+- **V3**: WebSocket error events, JSON error messages
+- **Both**: Proper async cleanup, context manager usage

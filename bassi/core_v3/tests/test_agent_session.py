@@ -12,7 +12,12 @@ Tests cover:
 """
 
 import pytest
-from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig, SessionStats
+
+from bassi.core_v3.agent_session import (
+    BassiAgentSession,
+    SessionConfig,
+    SessionStats,
+)
 
 
 class TestSessionConfig:

@@ -8,7 +8,10 @@ __version__ = "3.0.0"
 
 from .agent_session import BassiAgentSession, SessionConfig
 from .discovery import BassiDiscovery, display_startup_discovery
-from .message_converter import convert_message_to_websocket, convert_messages_batch
+from .message_converter import (
+    convert_message_to_websocket,
+    convert_messages_batch,
+)
 from .web_server_v3 import WebUIServerV3, start_web_server_v3
 
 __all__ = [

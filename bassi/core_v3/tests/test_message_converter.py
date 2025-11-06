@@ -4,7 +4,6 @@ Unit tests for message_converter.
 Tests every function and every message type conversion.
 """
 
-import pytest
 from claude_agent_sdk.types import (
     AssistantMessage,
     ResultMessage,
@@ -31,8 +30,7 @@ class TestConvertTextBlock:
     def test_text_block_simple(self):
         """Test simple text block conversion"""
         message = AssistantMessage(
-            content=[TextBlock(text="Hello world")],
-            model=TEST_MODEL
+            content=[TextBlock(text="Hello world")], model=TEST_MODEL
         )
 
         events = convert_message_to_websocket(message)
@@ -45,8 +43,7 @@ class TestConvertTextBlock:
         """Test text block with multiline content"""
         text = "Line 1\nLine 2\nLine 3"
         message = AssistantMessage(
-            content=[TextBlock(text=text)],
-            model=TEST_MODEL
+            content=[TextBlock(text=text)], model=TEST_MODEL
         )
 
         events = convert_message_to_websocket(message)
@@ -58,8 +55,7 @@ class TestConvertTextBlock:
     def test_text_block_empty(self):
         """Test empty text block"""
         message = AssistantMessage(
-            content=[TextBlock(text="")],
-            model=TEST_MODEL
+            content=[TextBlock(text="")], model=TEST_MODEL
         )
 
         events = convert_message_to_websocket(message)
@@ -82,7 +78,7 @@ class TestConvertToolUseBlock:
                     input={"path": "/foo/bar.txt"},
                 )
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -107,7 +103,7 @@ class TestConvertToolUseBlock:
                     },
                 )
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -133,7 +129,7 @@ class TestConvertToolResultBlock:
                     is_error=False,
                 )
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -154,7 +150,7 @@ class TestConvertToolResultBlock:
                     is_error=True,
                 )
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -174,7 +170,7 @@ class TestConvertToolResultBlock:
                     content="Result",
                 )
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -190,8 +186,12 @@ class TestConvertThinkingBlock:
     def test_thinking_block(self):
         """Test thinking block conversion"""
         message = AssistantMessage(
-            content=[ThinkingBlock(thinking="Let me analyze this...", signature="sig_123")],
-            model=TEST_MODEL
+            content=[
+                ThinkingBlock(
+                    thinking="Let me analyze this...", signature="sig_123"
+                )
+            ],
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -215,7 +215,7 @@ class TestConvertMixedContent:
                     input={"path": "/test.txt"},
                 ),
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -230,7 +230,10 @@ class TestConvertMixedContent:
         """Test message with thinking, text, and tool"""
         message = AssistantMessage(
             content=[
-                ThinkingBlock(thinking="I should check the file first", signature="sig_1"),
+                ThinkingBlock(
+                    thinking="I should check the file first",
+                    signature="sig_1",
+                ),
                 TextBlock(text="I'll read the file"),
                 ToolUseBlock(
                     id="tool_2",
@@ -238,7 +241,7 @@ class TestConvertMixedContent:
                     input={"path": "/data.json"},
                 ),
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -263,7 +266,7 @@ class TestConvertMixedContent:
                     input={"path": "/bar.txt", "content": "data"},
                 ),
             ],
-            model=TEST_MODEL
+            model=TEST_MODEL,
         )
 
         events = convert_message_to_websocket(message)
@@ -282,7 +285,7 @@ class TestConvertSystemMessage:
         """Test system message conversion"""
         message = SystemMessage(
             subtype="reminder",
-            data={"content": "System reminder: Be helpful"}
+            data={"content": "System reminder: Be helpful"},
         )
 
         events = convert_message_to_websocket(message)
@@ -392,15 +395,18 @@ class TestConvertMessagesBatch:
                         input={"command": "ls"},
                     ),
                 ],
-                model=TEST_MODEL
+                model=TEST_MODEL,
             ),
             AssistantMessage(
-                content=[ToolResultBlock(tool_use_id="tool_1", content="file1.txt\nfile2.txt")],
-                model=TEST_MODEL
+                content=[
+                    ToolResultBlock(
+                        tool_use_id="tool_1", content="file1.txt\nfile2.txt"
+                    )
+                ],
+                model=TEST_MODEL,
             ),
             AssistantMessage(
-                content=[TextBlock(text="Found 2 files")],
-                model=TEST_MODEL
+                content=[TextBlock(text="Found 2 files")], model=TEST_MODEL
             ),
             ResultMessage(
                 subtype="complete",
@@ -428,9 +434,13 @@ class TestConvertMessagesBatch:
         """Test that batch conversion preserves message order"""
         messages = [
             UserMessage(content="First"),
-            AssistantMessage(content=[TextBlock(text="Second")], model=TEST_MODEL),
+            AssistantMessage(
+                content=[TextBlock(text="Second")], model=TEST_MODEL
+            ),
             UserMessage(content="Third"),
-            AssistantMessage(content=[TextBlock(text="Fourth")], model=TEST_MODEL),
+            AssistantMessage(
+                content=[TextBlock(text="Fourth")], model=TEST_MODEL
+            ),
         ]
 
         events = convert_messages_batch(messages)
@@ -455,6 +465,7 @@ class TestEdgeCases:
 
     def test_unknown_message_type(self):
         """Test handling of unknown message type"""
+
         # Create a mock unknown message type
         class UnknownMessage:
             pass
@@ -468,8 +479,7 @@ class TestEdgeCases:
     def test_none_content(self):
         """Test handling of valid message with content"""
         message = AssistantMessage(
-            content=[TextBlock(text="valid")],
-            model=TEST_MODEL
+            content=[TextBlock(text="valid")], model=TEST_MODEL
         )
 
         events = convert_message_to_websocket(message)

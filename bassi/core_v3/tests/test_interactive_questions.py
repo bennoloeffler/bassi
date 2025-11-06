@@ -3,15 +3,16 @@ Tests for Interactive Questions System
 """
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from bassi.core_v3.interactive_questions import (
     InteractiveQuestionService,
     Question,
+    QuestionCancelledError,
     QuestionOption,
     QuestionTimeoutError,
-    QuestionCancelledError,
     QuestionValidationError,
 )
 
@@ -100,7 +101,9 @@ async def test_ask_single_question(question_service, mock_websocket):
     )
 
     # Start ask() in background
-    ask_task = asyncio.create_task(question_service.ask([question], timeout=5.0))
+    ask_task = asyncio.create_task(
+        question_service.ask([question], timeout=5.0)
+    )
 
     # Give it a moment to send the question
     await asyncio.sleep(0.1)
@@ -122,7 +125,9 @@ async def test_ask_single_question(question_service, mock_websocket):
 
 
 @pytest.mark.asyncio
-async def test_ask_multiple_questions_multiselect(question_service, mock_websocket):
+async def test_ask_multiple_questions_multiselect(
+    question_service, mock_websocket
+):
     """Test asking multiple questions with multiSelect"""
     questions = [
         Question(
@@ -147,7 +152,9 @@ async def test_ask_multiple_questions_multiselect(question_service, mock_websock
     ]
 
     # Start ask
-    ask_task = asyncio.create_task(question_service.ask(questions, timeout=5.0))
+    ask_task = asyncio.create_task(
+        question_service.ask(questions, timeout=5.0)
+    )
     await asyncio.sleep(0.1)
 
     # Get question ID
@@ -202,7 +209,9 @@ async def test_cancel_question(question_service, mock_websocket):
     )
 
     # Start ask
-    ask_task = asyncio.create_task(question_service.ask([question], timeout=5.0))
+    ask_task = asyncio.create_task(
+        question_service.ask([question], timeout=5.0)
+    )
     await asyncio.sleep(0.1)
 
     # Get question ID

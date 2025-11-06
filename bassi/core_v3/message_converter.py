@@ -61,7 +61,9 @@ def convert_message_to_websocket(message: Message) -> list[dict[str, Any]]:
         return []
 
 
-def _convert_assistant_message(message: AssistantMessage) -> list[dict[str, Any]]:
+def _convert_assistant_message(
+    message: AssistantMessage,
+) -> list[dict[str, Any]]:
     """Convert AssistantMessage to web UI events"""
     events = []
 
@@ -117,14 +119,31 @@ def _convert_content_block(block: ContentBlock) -> dict[str, Any] | None:
 
 
 def _convert_system_message(message: SystemMessage) -> list[dict[str, Any]]:
-    """Convert SystemMessage to web UI events"""
-    # SystemMessage has subtype and data dict
-    # Extract text from data if available
-    text = message.data.get("content", str(message.data))
+    """Convert SystemMessage to web UI events
+
+    SystemMessage contains:
+    - subtype: Type of system message (e.g., 'init', 'warning', 'compaction_start', etc.)
+    - data: Dictionary with message-specific data
+
+    For 'init' subtype, data contains:
+    - tools: List of available tool names
+    - mcp_servers: List of MCP server info
+    - slash_commands: List of slash command names
+    - skills: List of skill names
+    - agents: List of agent names
+    - And other session metadata
+
+    Subtype handling:
+    - 'init': Metadata only - should NOT be shown to users
+    - 'compaction_start': Important status - SHOULD be shown
+    - Other subtypes with 'content'/'message'/'text': Show to users
+    """
+    # Return event with preserved structure
     return [
         {
             "type": "system",
-            "text": text,
+            "subtype": message.subtype,
+            **message.data,  # Unpack all data fields into the event
         }
     ]
 
@@ -174,10 +193,16 @@ def _convert_user_message(message: UserMessage) -> list[dict[str, Any]]:
                 events.append(event)
     else:
         # Plain text user message
-        events.append({
-            "type": "user",
-            "text": message.content if isinstance(message.content, str) else str(message.content),
-        })
+        events.append(
+            {
+                "type": "user",
+                "text": (
+                    message.content
+                    if isinstance(message.content, str)
+                    else str(message.content)
+                ),
+            }
+        )
 
     return events
 

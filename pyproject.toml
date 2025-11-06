@@ -11,7 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "tavily-python>=0.7.12",
     "mcp>=1.18.0",
-    "claude-agent-sdk>=0.1.4",
+    "claude-agent-sdk==0.1.6",
     "prompt-toolkit>=3.0.52",
     "msgraph-sdk>=1.46.0",
     "azure-identity>=1.25.1",
@@ -21,10 +21,12 @@ dependencies = [
     "uvicorn>=0.38.0",
     "websockets>=15.0.1",
     "fastmcp>=2.13.0.2",
+    "watchfiles>=1.1.1",
 ]
 
 [project.scripts]
 bassi = "bassi.main:main"
+bassi-web = "bassi.core_v3.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -60,7 +62,7 @@ disallow_incomplete_defs = false
 check_untyped_defs = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "bassi/core_v3/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

@@ -1,5 +1,22 @@
 {
   "mcpServers": {
+
+
+
+    "linkedin-mcp": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/stickerdaniel/linkedin-mcp-server",
+        "linkedin-mcp-server",
+        "--cookie",
+        "${LINKEDIN_COOKIE}"
+      ],
+      "env": {
+        "CHROMEDRIVER_PATH": "/Users/benno/bin/chromedriver"
+      }
+    },
+
     "ms365": {
       "command": "npx",
       "args": ["-y", "@softeria/ms-365-mcp-server"],

@@ -45,21 +45,25 @@ class BassiDiscovery:
         project_cmd_dir = self.project_root / ".claude" / "commands"
         if project_cmd_dir.exists():
             for cmd_file in project_cmd_dir.glob("*.md"):
-                commands["project"].append({
-                    "name": f"/{cmd_file.stem}",
-                    "file": str(cmd_file),
-                    "source": "project",
-                })
+                commands["project"].append(
+                    {
+                        "name": f"/{cmd_file.stem}",
+                        "file": str(cmd_file),
+                        "source": "project",
+                    }
+                )
 
         # Personal commands
         personal_cmd_dir = Path.home() / ".claude" / "commands"
         if personal_cmd_dir.exists():
             for cmd_file in personal_cmd_dir.glob("*.md"):
-                commands["personal"].append({
-                    "name": f"/{cmd_file.stem}",
-                    "file": str(cmd_file),
-                    "source": "personal",
-                })
+                commands["personal"].append(
+                    {
+                        "name": f"/{cmd_file.stem}",
+                        "file": str(cmd_file),
+                        "source": "personal",
+                    }
+                )
 
         return commands
 
@@ -83,7 +87,9 @@ class BassiDiscovery:
             logger.error(f"Failed to load MCP config: {e}")
             return {}
 
-    def discover_skills(self, skill_dirs: list[Path] | None = None) -> list[dict[str, Any]]:
+    def discover_skills(
+        self, skill_dirs: list[Path] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Discover skills by scanning configured directories.
 
@@ -112,11 +118,13 @@ class BassiDiscovery:
 
                 skill_file = skill_path / "SKILL.md"
                 if skill_file.exists():
-                    skills.append({
-                        "name": skill_path.name,
-                        "path": str(skill_path),
-                        "skill_file": str(skill_file),
-                    })
+                    skills.append(
+                        {
+                            "name": skill_path.name,
+                            "path": str(skill_path),
+                            "skill_file": str(skill_file),
+                        }
+                    )
 
         return skills
 
@@ -146,7 +154,11 @@ class BassiDiscovery:
         if summary is None:
             summary = self.get_summary()
 
+        from datetime import datetime
+
         lines = []
+        lines.append(f"⏰ Discovery run at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("")
         lines.append("=" * 70)
         lines.append("BASSI DISCOVERY - Available Capabilities")
         lines.append("=" * 70)

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bassi - Claude Agent SDK Web UI</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
     <link rel="stylesheet" href="/static/style.css">
 
     <!-- Marked.js for markdown rendering -->
@@ -32,17 +33,26 @@
                 <div class="verbose-selector">
                     <label for="verbose-level">Verbosity:</label>
                     <select id="verbose-level">
-                        <option value="minimal">Minimal</option>
-                        <option value="normal" selected>Normal</option>
+                        <option value="none">None</option>
+                        <option value="minimal" selected>Minimal</option>
                         <option value="full">Full</option>
                     </select>
                 </div>
+                <button id="settings-button" class="settings-button" title="Settings">
+                    ⚙️
+                </button>
                 <div id="connection-status" class="connection-status">
                     🔄 Connecting...
                 </div>
             </div>
         </div>
     </header>
+
+    <!-- Server Status Indicator -->
+    <div id="server-status" class="server-status" style="display: none;">
+        <div class="status-spinner"></div>
+        <span id="status-text">Working...</span>
+    </div>
 
     <!-- Conversation Area -->
     <div id="conversation">
@@ -62,6 +72,30 @@
             <button id="send-button" disabled>
                 Send
             </button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="modal-close" id="settings-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label class="setting-label">Show Thinking Process</label>
+                        <p class="setting-description">
+                            Display Claude's step-by-step reasoning before final responses
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="thinking-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
         </div>
     </div>
 

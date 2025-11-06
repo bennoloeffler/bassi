@@ -15,7 +15,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
     """Validator for Word document XML files against XSD schemas."""
 
     # Word-specific namespace
-    WORD_2006_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    WORD_2006_NAMESPACE = (
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    )
 
     # Word-specific element to relationship type mappings
     # Start with empty mapping - add specific cases as we discover them
@@ -88,7 +90,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                     if elem.text:
                         text = elem.text
                         # Check if text starts or ends with whitespace
-                        if re.match(r"^\s.*", text) or re.match(r".*\s$", text):
+                        if re.match(r"^\s.*", text) or re.match(
+                            r".*\s$", text
+                        ):
                             # Check if xml:space="preserve" attribute exists
                             xml_space_attr = f"{{{self.XML_NAMESPACE}}}space"
                             if (
@@ -112,7 +116,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 )
 
         if errors:
-            print(f"FAILED - Found {len(errors)} whitespace preservation violations:")
+            print(
+                f"FAILED - Found {len(errors)} whitespace preservation violations:"
+            )
             for error in errors:
                 print(error)
             return False
@@ -161,7 +167,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 )
 
         if errors:
-            print(f"FAILED - Found {len(errors)} deletion validation violations:")
+            print(
+                f"FAILED - Found {len(errors)} deletion validation violations:"
+            )
             for error in errors:
                 print(error)
             return False
@@ -182,7 +190,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
             try:
                 root = lxml.etree.parse(str(xml_file)).getroot()
                 # Count all w:p elements
-                paragraphs = root.findall(f".//{{{self.WORD_2006_NAMESPACE}}}p")
+                paragraphs = root.findall(
+                    f".//{{{self.WORD_2006_NAMESPACE}}}p"
+                )
                 count = len(paragraphs)
             except Exception as e:
                 print(f"Error counting paragraphs in unpacked document: {e}")
@@ -205,7 +215,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 root = lxml.etree.parse(doc_xml_path).getroot()
 
                 # Count all w:p elements
-                paragraphs = root.findall(f".//{{{self.WORD_2006_NAMESPACE}}}p")
+                paragraphs = root.findall(
+                    f".//{{{self.WORD_2006_NAMESPACE}}}p"
+                )
                 count = len(paragraphs)
 
         except Exception as e:
@@ -231,7 +243,7 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 # Find w:delText in w:ins that are NOT within w:del
                 invalid_elements = root.xpath(
                     ".//w:ins//w:delText[not(ancestor::w:del)]",
-                    namespaces=namespaces
+                    namespaces=namespaces,
                 )
 
                 for elem in invalid_elements:
@@ -251,7 +263,9 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 )
 
         if errors:
-            print(f"FAILED - Found {len(errors)} insertion validation violations:")
+            print(
+                f"FAILED - Found {len(errors)} insertion validation violations:"
+            )
             for error in errors:
                 print(error)
             return False

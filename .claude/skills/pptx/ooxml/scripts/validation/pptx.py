@@ -123,7 +123,9 @@ class PPTXSchemaValidator(BaseSchemaValidator):
         # Remove common UUID delimiters
         clean_value = value.strip("{}()").replace("-", "")
         # Check if it's 32 hex-like characters (could include invalid hex chars)
-        return len(clean_value) == 32 and all(c.isalnum() for c in clean_value)
+        return len(clean_value) == 32 and all(
+            c.isalnum() for c in clean_value
+        )
 
     def validate_slide_layout_ids(self):
         """Validate that sldLayoutId elements in slide masters reference valid slide layouts."""
@@ -145,7 +147,11 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                 root = lxml.etree.parse(str(slide_master)).getroot()
 
                 # Find the corresponding _rels file for this slide master
-                rels_file = slide_master.parent / "_rels" / f"{slide_master.name}.rels"
+                rels_file = (
+                    slide_master.parent
+                    / "_rels"
+                    / f"{slide_master.name}.rels"
+                )
 
                 if not rels_file.exists():
                     errors.append(
@@ -188,7 +194,9 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                 )
 
         if errors:
-            print(f"FAILED - Found {len(errors)} slide layout ID validation errors:")
+            print(
+                f"FAILED - Found {len(errors)} slide layout ID validation errors:"
+            )
             for error in errors:
                 print(error)
             print(
@@ -197,7 +205,9 @@ class PPTXSchemaValidator(BaseSchemaValidator):
             return False
         else:
             if self.verbose:
-                print("PASSED - All slide layout IDs reference valid slide layouts")
+                print(
+                    "PASSED - All slide layout IDs reference valid slide layouts"
+                )
             return True
 
     def validate_no_duplicate_slide_layouts(self):
@@ -205,7 +215,9 @@ class PPTXSchemaValidator(BaseSchemaValidator):
         import lxml.etree
 
         errors = []
-        slide_rels_files = list(self.unpacked_dir.glob("ppt/slides/_rels/*.xml.rels"))
+        slide_rels_files = list(
+            self.unpacked_dir.glob("ppt/slides/_rels/*.xml.rels")
+        )
 
         for rels_file in slide_rels_files:
             try:
@@ -231,13 +243,17 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                 )
 
         if errors:
-            print("FAILED - Found slides with duplicate slideLayout references:")
+            print(
+                "FAILED - Found slides with duplicate slideLayout references:"
+            )
             for error in errors:
                 print(error)
             return False
         else:
             if self.verbose:
-                print("PASSED - All slides have exactly one slideLayout reference")
+                print(
+                    "PASSED - All slides have exactly one slideLayout reference"
+                )
             return True
 
     def validate_notes_slide_references(self):
@@ -245,10 +261,14 @@ class PPTXSchemaValidator(BaseSchemaValidator):
         import lxml.etree
 
         errors = []
-        notes_slide_references = {}  # Track which slides reference each notesSlide
+        notes_slide_references = (
+            {}
+        )  # Track which slides reference each notesSlide
 
         # Find all slide relationship files
-        slide_rels_files = list(self.unpacked_dir.glob("ppt/slides/_rels/*.xml.rels"))
+        slide_rels_files = list(
+            self.unpacked_dir.glob("ppt/slides/_rels/*.xml.rels")
+        )
 
         if not slide_rels_files:
             if self.verbose:
@@ -276,7 +296,10 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                                 ".xml", ""
                             )  # e.g., "slide1"
 
-                            if normalized_target not in notes_slide_references:
+                            if (
+                                normalized_target
+                                not in notes_slide_references
+                            ):
                                 notes_slide_references[normalized_target] = []
                             notes_slide_references[normalized_target].append(
                                 (slide_name, rels_file)
@@ -295,7 +318,9 @@ class PPTXSchemaValidator(BaseSchemaValidator):
                     f"  Notes slide '{target}' is referenced by multiple slides: {', '.join(slide_names)}"
                 )
                 for slide_name, rels_file in references:
-                    errors.append(f"    - {rels_file.relative_to(self.unpacked_dir)}")
+                    errors.append(
+                        f"    - {rels_file.relative_to(self.unpacked_dir)}"
+                    )
 
         if errors:
             print(

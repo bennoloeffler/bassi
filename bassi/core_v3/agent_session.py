@@ -16,12 +16,8 @@ from typing import Any, AsyncIterator, Callable, Optional
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import (
     AssistantMessage,
-    ContentBlock,
     Message,
     ResultMessage,
-    SystemMessage,
-    TextBlock,
-    ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
@@ -32,9 +28,13 @@ class SessionConfig:
     """Configuration for a Bassi agent session"""
 
     # Core settings
-    allowed_tools: list[str] = field(default_factory=lambda: ["Bash", "ReadFile", "WriteFile"])
+    allowed_tools: list[str] = field(
+        default_factory=lambda: ["Bash", "ReadFile", "WriteFile"]
+    )
     system_prompt: Optional[str] = None
-    permission_mode: Optional[str] = None  # "default", "acceptEdits", "plan", "bypassPermissions"
+    permission_mode: Optional[str] = (
+        None  # "default", "acceptEdits", "plan", "bypassPermissions"
+    )
 
     # MCP servers
     mcp_servers: dict[str, Any] = field(default_factory=dict)
@@ -108,6 +108,7 @@ class BassiAgentSession:
             can_use_tool=self.config.can_use_tool,
             hooks=self.config.hooks,
             setting_sources=self.config.setting_sources,
+            max_thinking_tokens=10000,  # Enable extended thinking with 10K token budget
         )
 
         # Client instance (created on connect)
@@ -135,12 +136,21 @@ class BassiAgentSession:
             CLINotFoundError: If Claude Code is not installed
             CLIConnectionError: If connection fails
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"🔶 [SESSION] connect() called, _connected={self._connected}")
         if self._connected:
+            logger.info(f"🔶 [SESSION] Already connected, returning")
             return
 
+        logger.info(f"🔶 [SESSION] Creating ClaudeSDKClient with options: {self.sdk_options}")
         self.client = ClaudeSDKClient(options=self.sdk_options)
+        logger.info(f"🔶 [SESSION] ClaudeSDKClient created, calling client.connect()...")
         await self.client.connect()
+        logger.info(f"🔶 [SESSION] client.connect() completed successfully")
         self._connected = True
+        logger.info(f"🔶 [SESSION] Session connected")
 
     async def disconnect(self):
         """Disconnect from Claude Code"""
@@ -151,9 +161,7 @@ class BassiAgentSession:
         self._connected = False
 
     async def query(
-        self,
-        prompt: str,
-        session_id: str = "default"
+        self, prompt: str, session_id: str = "default"
     ) -> AsyncIterator[Message]:
         """
         Send a query and stream responses.
@@ -241,11 +249,11 @@ class BassiAgentSession:
 
     def _update_stats_from_result(self, message: ResultMessage):
         """Update statistics from result message"""
-        if hasattr(message, 'input_tokens'):
+        if hasattr(message, "input_tokens"):
             self.stats.total_input_tokens += message.input_tokens
-        if hasattr(message, 'output_tokens'):
+        if hasattr(message, "output_tokens"):
             self.stats.total_output_tokens += message.output_tokens
-        if hasattr(message, 'total_cost_usd'):
+        if hasattr(message, "total_cost_usd"):
             self.stats.total_cost_usd += message.total_cost_usd
 
     def get_stats(self) -> dict[str, Any]:

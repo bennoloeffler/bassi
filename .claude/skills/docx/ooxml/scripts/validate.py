@@ -10,11 +10,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from validation import DOCXSchemaValidator, PPTXSchemaValidator, RedliningValidator
+from validation import (
+    DOCXSchemaValidator,
+    PPTXSchemaValidator,
+    RedliningValidator,
+)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate Office document XML files")
+    parser = argparse.ArgumentParser(
+        description="Validate Office document XML files"
+    )
     parser.add_argument(
         "unpacked_dir",
         help="Path to unpacked Office document directory",
@@ -38,9 +44,11 @@ def main():
     file_extension = original_file.suffix.lower()
     assert unpacked_dir.is_dir(), f"Error: {unpacked_dir} is not a directory"
     assert original_file.is_file(), f"Error: {original_file} is not a file"
-    assert file_extension in [".docx", ".pptx", ".xlsx"], (
-        f"Error: {original_file} must be a .docx, .pptx, or .xlsx file"
-    )
+    assert file_extension in [
+        ".docx",
+        ".pptx",
+        ".xlsx",
+    ], f"Error: {original_file} must be a .docx, .pptx, or .xlsx file"
 
     # Run validations
     match file_extension:
@@ -49,7 +57,9 @@ def main():
         case ".pptx":
             validators = [PPTXSchemaValidator]
         case _:
-            print(f"Error: Validation not supported for file type {file_extension}")
+            print(
+                f"Error: Validation not supported for file type {file_extension}"
+            )
             sys.exit(1)
 
     # Run validators

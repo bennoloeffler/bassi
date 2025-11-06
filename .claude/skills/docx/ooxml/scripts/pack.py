@@ -11,16 +11,25 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import defusedxml.minidom
 import zipfile
 from pathlib import Path
 
+import defusedxml.minidom
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Pack a directory into an Office file")
-    parser.add_argument("input_directory", help="Unpacked Office document directory")
-    parser.add_argument("output_file", help="Output Office file (.docx/.pptx/.xlsx)")
-    parser.add_argument("--force", action="store_true", help="Skip validation")
+    parser = argparse.ArgumentParser(
+        description="Pack a directory into an Office file"
+    )
+    parser.add_argument(
+        "input_directory", help="Unpacked Office document directory"
+    )
+    parser.add_argument(
+        "output_file", help="Output Office file (.docx/.pptx/.xlsx)"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Skip validation"
+    )
     args = parser.parse_args()
 
     try:
@@ -30,12 +39,18 @@ def main():
 
         # Show warning if validation was skipped
         if args.force:
-            print("Warning: Skipped validation, file may be corrupt", file=sys.stderr)
+            print(
+                "Warning: Skipped validation, file may be corrupt",
+                file=sys.stderr,
+            )
         # Exit with error if validation failed
         elif not success:
             print("Contents would produce a corrupt file.", file=sys.stderr)
             print("Please validate XML before repacking.", file=sys.stderr)
-            print("Use --force to skip validation and pack anyway.", file=sys.stderr)
+            print(
+                "Use --force to skip validation and pack anyway.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     except ValueError as e:
@@ -59,7 +74,9 @@ def pack_document(input_dir, output_file, validate=False):
     if not input_dir.is_dir():
         raise ValueError(f"{input_dir} is not a directory")
     if output_file.suffix.lower() not in {".docx", ".pptx", ".xlsx"}:
-        raise ValueError(f"{output_file} must be a .docx, .pptx, or .xlsx file")
+        raise ValueError(
+            f"{output_file} must be a .docx, .pptx, or .xlsx file"
+        )
 
     # Work in temporary directory to avoid modifying original
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -115,15 +132,22 @@ def validate_document(doc_path):
                 text=True,
             )
             if not (Path(temp_dir) / f"{doc_path.stem}.html").exists():
-                error_msg = result.stderr.strip() or "Document validation failed"
+                error_msg = (
+                    result.stderr.strip() or "Document validation failed"
+                )
                 print(f"Validation error: {error_msg}", file=sys.stderr)
                 return False
             return True
         except FileNotFoundError:
-            print("Warning: soffice not found. Skipping validation.", file=sys.stderr)
+            print(
+                "Warning: soffice not found. Skipping validation.",
+                file=sys.stderr,
+            )
             return True
         except subprocess.TimeoutExpired:
-            print("Validation error: Timeout during conversion", file=sys.stderr)
+            print(
+                "Validation error: Timeout during conversion", file=sys.stderr
+            )
             return False
         except Exception as e:
             print(f"Validation error: {e}", file=sys.stderr)

@@ -92,7 +92,9 @@ def main():
     # Validate columns
     cols = min(args.cols, MAX_COLS)
     if args.cols > MAX_COLS:
-        print(f"Warning: Columns limited to {MAX_COLS} (requested {args.cols})")
+        print(
+            f"Warning: Columns limited to {MAX_COLS} (requested {args.cols})"
+        )
 
     # Validate input
     input_path = Path(args.input)
@@ -112,14 +114,18 @@ def main():
             slide_dimensions = None
             if args.outline_placeholders:
                 print("Extracting placeholder regions...")
-                placeholder_regions, slide_dimensions = get_placeholder_regions(
-                    input_path
+                placeholder_regions, slide_dimensions = (
+                    get_placeholder_regions(input_path)
                 )
                 if placeholder_regions:
-                    print(f"Found placeholders on {len(placeholder_regions)} slides")
+                    print(
+                        f"Found placeholders on {len(placeholder_regions)} slides"
+                    )
 
             # Convert slides to images
-            slide_images = convert_to_images(input_path, Path(temp_dir), CONVERSION_DPI)
+            slide_images = convert_to_images(
+                input_path, Path(temp_dir), CONVERSION_DPI
+            )
             if not slide_images:
                 print("Error: No slides found")
                 sys.exit(1)
@@ -235,7 +241,14 @@ def convert_to_images(pptx_path, temp_dir, dpi):
     # Convert PDF to images
     print(f"Converting to images at {dpi} DPI...")
     result = subprocess.run(
-        ["pdftoppm", "-jpeg", "-r", str(dpi), str(pdf_path), str(temp_dir / "slide")],
+        [
+            "pdftoppm",
+            "-jpeg",
+            "-r",
+            str(dpi),
+            str(pdf_path),
+            str(temp_dir / "slide"),
+        ],
         capture_output=True,
         text=True,
     )
@@ -259,7 +272,9 @@ def convert_to_images(pptx_path, temp_dir, dpi):
         if slide_num in hidden_slides:
             # Create placeholder image for hidden slide
             placeholder_path = temp_dir / f"hidden-{slide_num:03d}.jpg"
-            placeholder_img = create_hidden_slide_placeholder(placeholder_size)
+            placeholder_img = create_hidden_slide_placeholder(
+                placeholder_size
+            )
             placeholder_img.save(placeholder_path, "JPEG")
             all_images.append(placeholder_path)
         else:
@@ -297,7 +312,12 @@ def create_grids(
 
         # Create grid for this chunk
         grid = create_grid(
-            chunk_images, cols, width, start_idx, placeholder_regions, slide_dimensions
+            chunk_images,
+            cols,
+            width,
+            start_idx,
+            placeholder_regions,
+            slide_dimensions,
         )
 
         # Generate output filename
@@ -308,7 +328,9 @@ def create_grids(
             # Multiple grids - insert index before extension with dash
             stem = output_path.stem
             suffix = output_path.suffix
-            grid_filename = output_path.parent / f"{stem}-{chunk_idx + 1}{suffix}"
+            grid_filename = (
+                output_path.parent / f"{stem}-{chunk_idx + 1}{suffix}"
+            )
 
         # Save grid
         grid_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -338,7 +360,10 @@ def create_grid(
     # Calculate grid size
     rows = (len(image_paths) + cols - 1) // cols
     grid_w = cols * width + (cols + 1) * GRID_PADDING
-    grid_h = rows * (height + font_size + label_padding * 2) + (rows + 1) * GRID_PADDING
+    grid_h = (
+        rows * (height + font_size + label_padding * 2)
+        + (rows + 1) * GRID_PADDING
+    )
 
     # Create grid
     grid = Image.new("RGB", (grid_w, grid_h), "white")
@@ -357,7 +382,8 @@ def create_grid(
         row, col = i // cols, i % cols
         x = col * width + (col + 1) * GRID_PADDING
         y_base = (
-            row * (height + font_size + label_padding * 2) + (row + 1) * GRID_PADDING
+            row * (height + font_size + label_padding * 2)
+            + (row + 1) * GRID_PADDING
         )
 
         # Add label with actual slide number
@@ -379,7 +405,10 @@ def create_grid(
             orig_w, orig_h = img.size
 
             # Apply placeholder outlines if enabled
-            if placeholder_regions and (start_slide_num + i) in placeholder_regions:
+            if (
+                placeholder_regions
+                and (start_slide_num + i) in placeholder_regions
+            ):
                 # Convert to RGBA for transparency support
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
@@ -416,7 +445,10 @@ def create_grid(
                         5, min(orig_w, orig_h) // 150
                     )  # Thicker proportional stroke width
                     overlay_draw.rectangle(
-                        [(px_left, px_top), (px_left + px_width, px_top + px_height)],
+                        [
+                            (px_left, px_top),
+                            (px_left + px_width, px_top + px_height),
+                        ],
                         outline=(255, 0, 0, 255),  # Bright red, fully opaque
                         width=stroke_width,
                     )
@@ -437,7 +469,10 @@ def create_grid(
                 draw.rectangle(
                     [
                         (tx - BORDER_WIDTH, ty - BORDER_WIDTH),
-                        (tx + w + BORDER_WIDTH - 1, ty + h + BORDER_WIDTH - 1),
+                        (
+                            tx + w + BORDER_WIDTH - 1,
+                            ty + h + BORDER_WIDTH - 1,
+                        ),
                     ],
                     outline="gray",
                     width=BORDER_WIDTH,

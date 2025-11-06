@@ -8,7 +8,7 @@ with multiple-choice options during agent execution.
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import WebSocket
 
@@ -61,7 +61,9 @@ class Question:
 
         for option in self.options:
             if not option.label or not option.description:
-                raise QuestionValidationError("Option label and description required")
+                raise QuestionValidationError(
+                    "Option label and description required"
+                )
 
 
 @dataclass
@@ -189,7 +191,10 @@ class InteractiveQuestionService:
                             "header": q.header,
                             "multiSelect": q.multiSelect,
                             "options": [
-                                {"label": opt.label, "description": opt.description}
+                                {
+                                    "label": opt.label,
+                                    "description": opt.description,
+                                }
                                 for opt in q.options
                             ],
                         }
@@ -200,7 +205,9 @@ class InteractiveQuestionService:
         except Exception as e:
             # Clean up on send failure
             del self.pending_questions[question_id]
-            raise QuestionCancelledError(f"Failed to send question: {e}") from e
+            raise QuestionCancelledError(
+                f"Failed to send question: {e}"
+            ) from e
 
         # Wait for response with timeout
         try:
@@ -223,7 +230,9 @@ class InteractiveQuestionService:
         del self.pending_questions[question_id]
 
         if answer is None:
-            raise QuestionCancelledError("Question was cancelled without answer")
+            raise QuestionCancelledError(
+                "Question was cancelled without answer"
+            )
 
         return answer
 
@@ -262,7 +271,9 @@ class InteractiveQuestionService:
         pending.answer = answers
         pending.event.set()
 
-    def cancel_question(self, question_id: str, error: Optional[Exception] = None):
+    def cancel_question(
+        self, question_id: str, error: Optional[Exception] = None
+    ):
         """
         Cancel a pending question.
 

@@ -43,20 +43,25 @@ def create_bassi_tools(question_service: InteractiveQuestionService) -> list:
                     "maxItems": 4,
                     "items": {
                         "type": "object",
-                        "required": ["question", "header", "multiSelect", "options"],
+                        "required": [
+                            "question",
+                            "header",
+                            "multiSelect",
+                            "options",
+                        ],
                         "properties": {
                             "question": {
                                 "type": "string",
-                                "description": "The complete question to ask"
+                                "description": "The complete question to ask",
                             },
                             "header": {
                                 "type": "string",
                                 "description": "Very short label (max 12 chars)",
-                                "maxLength": 12
+                                "maxLength": 12,
                             },
                             "multiSelect": {
                                 "type": "boolean",
-                                "description": "Set to true to allow multiple selections. Use for non-mutually exclusive choices."
+                                "description": "Set to true to allow multiple selections. Use for non-mutually exclusive choices.",
                             },
                             "options": {
                                 "type": "array",
@@ -69,19 +74,19 @@ def create_bassi_tools(question_service: InteractiveQuestionService) -> list:
                                     "properties": {
                                         "label": {
                                             "type": "string",
-                                            "description": "Display text (1-5 words, concise)"
+                                            "description": "Display text (1-5 words, concise)",
                                         },
                                         "description": {
                                             "type": "string",
-                                            "description": "Explanation of what this option means or what will happen if chosen"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                                            "description": "Explanation of what this option means or what will happen if chosen",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
                 }
-            }
+            },
         },
     )
     async def ask_user_question(args: dict[str, Any]) -> dict[str, Any]:
@@ -166,7 +171,9 @@ def create_bassi_tools(question_service: InteractiveQuestionService) -> list:
             for question_text, answer in answers.items():
                 if isinstance(answer, list):
                     answer_text = ", ".join(answer)
-                    formatted_answers.append(f'"{question_text}"={answer_text}')
+                    formatted_answers.append(
+                        f'"{question_text}"={answer_text}'
+                    )
                 else:
                     formatted_answers.append(f'"{question_text}"={answer}')
 
@@ -180,13 +187,21 @@ def create_bassi_tools(question_service: InteractiveQuestionService) -> list:
 
         except QuestionValidationError as e:
             return {
-                "content": [{"type": "text", "text": f"Question validation error: {e}"}],
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Question validation error: {e}",
+                    }
+                ],
                 "isError": True,
             }
         except Exception as e:
             return {
                 "content": [
-                    {"type": "text", "text": f"Error asking user question: {e}"}
+                    {
+                        "type": "text",
+                        "text": f"Error asking user question: {e}",
+                    }
                 ],
                 "isError": True,
             }

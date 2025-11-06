@@ -21,10 +21,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig
-from bassi.core_v3.message_converter import convert_message_to_websocket
 from bassi.core_v3.interactive_questions import InteractiveQuestionService
+from bassi.core_v3.message_converter import convert_message_to_websocket
 from bassi.core_v3.tools import create_bassi_tools
 
+# Configure logging at module level for uvicorn subprocess
+# (logging config from cli.py doesn't get inherited by subprocess)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True,  # Override any existing config
+)
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +45,9 @@ class WebUIServerV3:
 
     def __init__(
         self,
-        session_factory: Callable[[InteractiveQuestionService], BassiAgentSession],
+        session_factory: Callable[
+            [InteractiveQuestionService], BassiAgentSession
+        ],
         host: str = "localhost",
         port: int = 8765,
     ):
@@ -87,7 +96,9 @@ class WebUIServerV3:
         # Serve static files (HTML, CSS, JS)
         static_dir = Path(__file__).parent.parent / "static"
         if static_dir.exists():
-            self.app.mount("/static", StaticFiles(directory=static_dir), name="static")
+            self.app.mount(
+                "/static", StaticFiles(directory=static_dir), name="static"
+            )
 
             # Serve index.html at root
             @self.app.get("/", response_class=HTMLResponse)
@@ -98,11 +109,147 @@ class WebUIServerV3:
         # Health check
         @self.app.get("/health")
         async def health():
-            return JSONResponse({
-                "status": "ok",
-                "service": "bassi-web-ui-v3",
-                "active_sessions": len(self.active_sessions),
-            })
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "service": "bassi-web-ui-v3",
+                    "active_sessions": len(self.active_sessions),
+                }
+            )
+
+        # Capabilities endpoint - provides session metadata
+        @self.app.get("/api/capabilities")
+        async def get_capabilities():
+            """
+            Get session capabilities via discovery + SDK.
+
+            Returns available tools, MCP servers, slash commands,
+            skills, and agents for the current session.
+
+            This is a REST endpoint separate from WebSocket to provide
+            semantic clarity (capabilities are metadata, not conversation).
+            """
+            try:
+                from bassi.core_v3.discovery import BassiDiscovery
+
+                # Get filesystem discovery data
+                discovery = BassiDiscovery()
+                summary = discovery.get_summary()
+
+                # Transform MCP servers with status field
+                mcp_servers = []
+                for name, config in summary.get("mcp_servers", {}).items():
+                    mcp_servers.append(
+                        {
+                            "name": name,
+                            "status": "configured",  # Could be enhanced to check if running
+                            **config,
+                        }
+                    )
+
+                # Initialize with discovery data (will be overridden by SDK if available)
+                slash_commands = []
+                for source, commands in summary.get(
+                    "slash_commands", {}
+                ).items():
+                    slash_commands.extend(commands)
+
+                skills = summary.get("skills", [])
+
+                # Get SDK tools and agents
+                # Tools are only available during an active conversation,
+                # so we need to send a query to trigger tool discovery
+                tools = []
+                agents = []
+
+                temp_service = InteractiveQuestionService()
+                temp_session = self.session_factory(temp_service)
+                try:
+                    await temp_session.connect()
+
+                    # Send a minimal query to trigger tool discovery
+                    # The SDK will respond with available tools in SystemMessage
+                    tools_found = []
+
+                    logger.info("🔍 Starting tool discovery query...")
+                    async for message in temp_session.query(
+                        "ready", session_id="capabilities-discovery"
+                    ):
+                        # Extract tool names from system message
+                        from claude_agent_sdk.types import SystemMessage
+
+                        if isinstance(message, SystemMessage):
+                            logger.info(
+                                f"✅ Found SystemMessage with subtype: {message.subtype}"
+                            )
+
+                            # Extract data from SystemMessage.data
+                            if isinstance(message.data, dict):
+                                # Get tools (list of dicts with 'name' key)
+                                sdk_tools = message.data.get("tools", [])
+                                for tool in sdk_tools:
+                                    if (
+                                        isinstance(tool, dict)
+                                        and "name" in tool
+                                    ):
+                                        tools_found.append(tool["name"])
+                                    elif isinstance(tool, str):
+                                        tools_found.append(tool)
+
+                                # Extract agents
+                                sdk_agents = message.data.get("agents", [])
+                                if sdk_agents:
+                                    agents = sdk_agents
+
+                                # Extract slash commands from SDK (overrides discovery)
+                                sdk_slash_commands = message.data.get(
+                                    "slash_commands", []
+                                )
+                                if sdk_slash_commands:
+                                    slash_commands = sdk_slash_commands
+
+                                # Extract skills from SDK (overrides discovery)
+                                sdk_skills = message.data.get("skills", [])
+                                if sdk_skills:
+                                    skills = sdk_skills
+
+                                logger.info(
+                                    f"✅ Extracted {len(tools_found)} tools, {len(slash_commands)} commands, {len(agents)} agents"
+                                )
+                            else:
+                                logger.warning(
+                                    "⚠️ SystemMessage.data is not a dict!"
+                                )
+
+                            break  # Stop after getting system message
+
+                    logger.info(
+                        f"✅ Tool discovery complete. Found {len(tools_found)} tools"
+                    )
+                    tools = tools_found
+
+                    await temp_session.disconnect()
+                except Exception as sdk_error:
+                    logger.warning(
+                        f"Could not fetch SDK tools: {sdk_error}",
+                        exc_info=True,
+                    )
+                    # Continue without SDK tools - discovery data still works
+
+                return JSONResponse(
+                    {
+                        "tools": tools,
+                        "mcp_servers": mcp_servers,
+                        "slash_commands": slash_commands,
+                        "skills": skills,
+                        "agents": agents,
+                    }
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error fetching capabilities: {e}", exc_info=True
+                )
+                return JSONResponse({"error": str(e)}, status_code=500)
 
         # WebSocket endpoint
         @self.app.websocket("/ws")
@@ -113,90 +260,64 @@ class WebUIServerV3:
         """Handle WebSocket connection with isolated agent session"""
         # Generate unique connection ID
         connection_id = str(uuid.uuid4())
+        logger.info(f"🔷 [WS] Generated connection ID: {connection_id[:8]}...")
 
         # Create interactive question service for this session
+        logger.info(f"🔷 [WS] Creating InteractiveQuestionService...")
         question_service = InteractiveQuestionService()
         question_service.websocket = websocket
         self.question_services[connection_id] = question_service
+        logger.info(f"🔷 [WS] InteractiveQuestionService created")
 
         # Create dedicated agent session with question service
+        logger.info(f"🔷 [WS] Creating agent session via factory...")
         session = self.session_factory(question_service)
         self.active_sessions[connection_id] = session
+        logger.info(f"🔷 [WS] Agent session created: {type(session)}")
 
+        logger.info(f"🔷 [WS] Accepting WebSocket connection...")
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.info(f"🔷 [WS] WebSocket accepted")
 
         logger.info(
             f"New session: {connection_id[:8]}... | Total connections: {len(self.active_connections)}"
         )
 
         try:
+            # Send status update before connecting
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": "🔌 Connecting to Claude Agent SDK...",
+                }
+            )
+
             # Connect agent session
+            logger.info(f"🔷 [WS] Calling session.connect()...")
             await session.connect()
+            logger.info(f"🔷 [WS] session.connect() completed")
 
-            # Send welcome message with session ID
-            await websocket.send_json({
-                "type": "connected",
-                "session_id": connection_id,
-                "message": "Connected to Bassi V3 (Agent SDK)",
-            })
+            # Send status update after connecting
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": "✅ Claude Agent SDK connected successfully",
+                }
+            )
 
-            # Send discovery info (available tools, commands, skills, MCP servers)
-            from bassi.core_v3.discovery import BassiDiscovery
-            discovery = BassiDiscovery(Path(__file__).parent.parent.parent)
-            discovery_summary = discovery.get_summary()
+            # Send connected event to trigger welcome box
+            logger.info(f"🔷 [WS] Sending 'connected' event to client...")
+            await websocket.send_json(
+                {
+                    "type": "connected",
+                    "session_id": connection_id,
+                }
+            )
+            logger.info(f"🔷 [WS] 'connected' event sent successfully")
 
-            # Format as a practical, well-designed welcome message
-            mcp_servers = discovery_summary.get("mcp_servers", {})
-            project_cmds = discovery_summary["slash_commands"]["project"]
-            personal_cmds = discovery_summary["slash_commands"]["personal"]
-            skills = discovery_summary.get("skills", [])
-
-            # MCP server short descriptions
-            mcp_info = {
-                "ms365": "📧 Email, Calendar, Contacts",
-                "playwright": "🌐 Web Automation",
-                "postgresql": "🗄️ CRM Database"
-            }
-
-            welcome_html = f"""<div class="startup-welcome">
-<div class="startup-header">
-<h2>Ready to assist</h2>
-<p class="startup-subtitle">All capabilities loaded and available</p>
-</div>
-
-<div class="startup-grid">
-<div class="startup-section">
-<h3>📡 MCP Servers <span class="count">({len(mcp_servers)})</span></h3>
-<div class="capability-list">
-{"".join([f'<div class="capability-item"><span class="cap-name">{name}</span><span class="cap-desc">{mcp_info.get(name, "MCP Server")}</span></div>' for name in mcp_servers.keys()])}
-</div>
-</div>
-
-<div class="startup-section">
-<h3>💻 Commands <span class="count">({len(project_cmds) + len(personal_cmds)})</span></h3>
-<div class="capability-list">
-{"".join([f'<div class="capability-item"><code class="cap-name">{cmd["name"]}</code></div>' for cmd in project_cmds + personal_cmds])}
-</div>
-</div>
-
-<div class="startup-section">
-<h3>🎯 Skills <span class="count">({len(skills)})</span></h3>
-<div class="capability-list capability-compact">
-{"".join([f'<span class="skill-tag">{s["name"]}</span>' for s in skills[:8]])}
-</div>
-</div>
-</div>
-
-<div class="startup-footer">
-<p>Type <code>/help</code> for detailed documentation and examples</p>
-</div>
-</div>"""
-
-            await websocket.send_json({
-                "type": "system_message",
-                "content": welcome_html
-            })
+            # NOTE: Capabilities are now fetched via REST endpoint /api/capabilities
+            # (removed confusing empty query startup hack)
 
             # Listen for messages
             # We need to handle messages concurrently so we don't block
@@ -208,12 +329,16 @@ class WebUIServerV3:
                         data = await websocket.receive_json()
                         # Process message without awaiting to avoid blocking
                         asyncio.create_task(
-                            self._process_message(websocket, data, connection_id)
+                            self._process_message(
+                                websocket, data, connection_id
+                            )
                         )
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:
-                    logger.error(f"Message receiver error: {e}", exc_info=True)
+                    logger.error(
+                        f"Message receiver error: {e}", exc_info=True
+                    )
 
             # Start message receiver as background task and keep connection alive
             receiver_task = asyncio.create_task(message_receiver())
@@ -262,21 +387,28 @@ class WebUIServerV3:
             content = data.get("content", "")
 
             # IMPORTANT: Echo user's message back so it appears in conversation history
-            await websocket.send_json({
-                "type": "user_message_echo",
-                "content": content,
-            })
+            await websocket.send_json(
+                {
+                    "type": "user_message_echo",
+                    "content": content,
+                }
+            )
 
             # Handle /help command - show available capabilities
             if content.strip().lower() in ["/help", "help", "/?"]:
                 from bassi.core_v3.discovery import BassiDiscovery
-                discovery = BassiDiscovery(Path(__file__).parent.parent.parent)
+
+                discovery = BassiDiscovery(
+                    Path(__file__).parent.parent.parent
+                )
                 discovery_summary = discovery.get_summary()
 
                 # Format help message with better structure
                 mcp_servers = discovery_summary.get("mcp_servers", {})
                 project_cmds = discovery_summary["slash_commands"]["project"]
-                personal_cmds = discovery_summary["slash_commands"]["personal"]
+                personal_cmds = discovery_summary["slash_commands"][
+                    "personal"
+                ]
                 skills = discovery_summary.get("skills", [])
 
                 help_message = """<div class="help-container">
@@ -330,23 +462,41 @@ class WebUIServerV3:
                 mcp_descriptions = {
                     "ms365": {
                         "desc": "Microsoft 365 integration - emails, calendar, contacts",
-                        "tools": ["read emails", "send emails", "schedule meetings", "list contacts"],
-                        "example": '"Check my emails from today"'
+                        "tools": [
+                            "read emails",
+                            "send emails",
+                            "schedule meetings",
+                            "list contacts",
+                        ],
+                        "example": '"Check my emails from today"',
                     },
                     "playwright": {
                         "desc": "Web browser automation and testing",
-                        "tools": ["navigate websites", "take screenshots", "fill forms", "click elements"],
-                        "example": '"Take a screenshot of example.com"'
+                        "tools": [
+                            "navigate websites",
+                            "take screenshots",
+                            "fill forms",
+                            "click elements",
+                        ],
+                        "example": '"Take a screenshot of example.com"',
                     },
                     "postgresql": {
                         "desc": "PostgreSQL database access for CRM data",
-                        "tools": ["query database", "list tables", "insert records", "update records"],
-                        "example": '"Show all companies in the database"'
-                    }
+                        "tools": [
+                            "query database",
+                            "list tables",
+                            "insert records",
+                            "update records",
+                        ],
+                        "example": '"Show all companies in the database"',
+                    },
                 }
 
                 for name, config in mcp_servers.items():
-                    desc_info = mcp_descriptions.get(name, {"desc": "MCP server", "tools": [], "example": ""})
+                    desc_info = mcp_descriptions.get(
+                        name,
+                        {"desc": "MCP server", "tools": [], "example": ""},
+                    )
                     help_message += f"""
 <div class="mcp-box">
 <h3 class="mcp-name">{name}</h3>
@@ -371,22 +521,25 @@ class WebUIServerV3:
                 cmd_descriptions = {
                     "/crm": {
                         "desc": "Extract CRM data from text and manage database records",
-                        "example": '<code>/crm New company: TechStart GmbH, Berlin, Software Development industry</code>'
+                        "example": "<code>/crm New company: TechStart GmbH, Berlin, Software Development industry</code>",
                     },
                     "/epct": {
                         "desc": "Personal command for EPCT-related tasks",
-                        "example": '<code>/epct [your command]</code>'
+                        "example": "<code>/epct [your command]</code>",
                     },
                     "/crm-analyse-customer": {
                         "desc": "Analyze customer data and generate insights",
-                        "example": '<code>/crm-analyse-customer CompanyName</code>'
-                    }
+                        "example": "<code>/crm-analyse-customer CompanyName</code>",
+                    },
                 }
 
                 if project_cmds:
                     help_message += "<h3>Project Commands:</h3>"
                     for cmd in project_cmds:
-                        cmd_info = cmd_descriptions.get(cmd['name'], {"desc": "Command", "example": cmd['name']})
+                        cmd_info = cmd_descriptions.get(
+                            cmd["name"],
+                            {"desc": "Command", "example": cmd["name"]},
+                        )
                         help_message += f"""
 <div class="command-box">
 <h4 class="command-name">{cmd['name']}</h4>
@@ -400,7 +553,13 @@ class WebUIServerV3:
                 if personal_cmds:
                     help_message += "<h3>Personal Commands:</h3>"
                     for cmd in personal_cmds:
-                        cmd_info = cmd_descriptions.get(cmd['name'], {"desc": "Personal command", "example": cmd['name']})
+                        cmd_info = cmd_descriptions.get(
+                            cmd["name"],
+                            {
+                                "desc": "Personal command",
+                                "example": cmd["name"],
+                            },
+                        )
                         help_message += f"""
 <div class="command-box">
 <h4 class="command-name">{cmd['name']}</h4>
@@ -423,28 +582,31 @@ class WebUIServerV3:
                 skill_descriptions = {
                     "crm-db": {
                         "desc": "CRM database schema and query knowledge",
-                        "used_by": "Automatically loaded by /crm command"
+                        "used_by": "Automatically loaded by /crm command",
                     },
                     "xlsx": {
                         "desc": "Excel spreadsheet creation and editing",
-                        "used_by": "When working with .xlsx files"
+                        "used_by": "When working with .xlsx files",
                     },
                     "pdf": {
                         "desc": "PDF document creation and manipulation",
-                        "used_by": "When working with .pdf files"
+                        "used_by": "When working with .pdf files",
                     },
                     "docx": {
                         "desc": "Word document creation and editing",
-                        "used_by": "When working with .docx files"
+                        "used_by": "When working with .docx files",
                     },
                     "pptx": {
                         "desc": "PowerPoint presentation creation",
-                        "used_by": "When working with .pptx files"
-                    }
+                        "used_by": "When working with .pptx files",
+                    },
                 }
 
                 for skill in skills:
-                    skill_info = skill_descriptions.get(skill['name'], {"desc": "Skill", "used_by": "As needed"})
+                    skill_info = skill_descriptions.get(
+                        skill["name"],
+                        {"desc": "Skill", "used_by": "As needed"},
+                    )
                     help_message += f"""
 <div class="skill-box">
 <h4 class="skill-name">{skill['name']}</h4>
@@ -508,10 +670,12 @@ class WebUIServerV3:
 
 </div>"""
 
-                await websocket.send_json({
-                    "type": "assistant_message",
-                    "content": help_message,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "assistant_message",
+                        "content": help_message,
+                    }
+                )
 
                 # Don't process further - help is handled
                 return  # Exit this message processing
@@ -523,7 +687,7 @@ class WebUIServerV3:
             current_text_block_id = None
             tool_id_map = {}  # tool_use_id -> display_id
 
-            print(f"🔄 Starting query...", flush=True)
+            print("🔄 Starting query...", flush=True)
 
             try:
                 # Stream response from agent session
@@ -532,33 +696,54 @@ class WebUIServerV3:
                     print(f"📦 Got message: {msg_type_name}", flush=True)
 
                     # Debug content blocks
-                    if hasattr(message, 'content'):
+                    if hasattr(message, "content"):
                         if isinstance(message.content, list):
-                            blocks = [type(b).__name__ for b in message.content]
+                            blocks = [
+                                type(b).__name__ for b in message.content
+                            ]
                             print(f"   Content blocks: {blocks}", flush=True)
                         else:
-                            print(f"   Content: {type(message.content).__name__}", flush=True)
+                            print(
+                                f"   Content: {type(message.content).__name__}",
+                                flush=True,
+                            )
 
                     # Skip UserMessage ONLY if it's plain text (user's input echo)
                     # BUT keep UserMessage with ToolResultBlock (tool results from SDK)
-                    from claude_agent_sdk.types import UserMessage, ToolResultBlock
+                    from claude_agent_sdk.types import (
+                        ToolResultBlock,
+                        UserMessage,
+                    )
+
                     if isinstance(message, UserMessage):
                         # Check if this UserMessage contains ToolResultBlock
                         has_tool_result = False
-                        if hasattr(message, 'content') and isinstance(message.content, list):
-                            has_tool_result = any(isinstance(block, ToolResultBlock) for block in message.content)
+                        if hasattr(message, "content") and isinstance(
+                            message.content, list
+                        ):
+                            has_tool_result = any(
+                                isinstance(block, ToolResultBlock)
+                                for block in message.content
+                            )
 
                         if not has_tool_result:
                             # Plain user message - skip it (we already showed it in UI)
-                            print("   ⏩ Skipping plain UserMessage", flush=True)
+                            print(
+                                "   ⏩ Skipping plain UserMessage", flush=True
+                            )
                             continue
                         else:
                             # UserMessage with tool results - keep it!
-                            print("   ✅ UserMessage contains ToolResultBlock - processing", flush=True)
+                            print(
+                                "   ✅ UserMessage contains ToolResultBlock - processing",
+                                flush=True,
+                            )
 
                     # Convert Agent SDK message to web UI events
                     events = convert_message_to_websocket(message)
-                    logger.info(f"   📤 Generated {len(events)} events: {[e.get('type') for e in events]}")
+                    logger.info(
+                        f"   📤 Generated {len(events)} events: {[e.get('type') for e in events]}"
+                    )
 
                     # Enhance events with IDs for web UI
                     for event in events:
@@ -573,74 +758,135 @@ class WebUIServerV3:
 
                         elif event_type == "tool_start":
                             # Create tool block ID
-                            tool_use_id = event.get("id")  # Agent SDK's tool_use_id
-                            display_id = f"msg-{message_counter}-tool-{tool_counter}"
+                            tool_use_id = event.get(
+                                "id"
+                            )  # Agent SDK's tool_use_id
+                            display_id = (
+                                f"msg-{message_counter}-tool-{tool_counter}"
+                            )
                             tool_counter += 1
                             tool_id_map[tool_use_id] = display_id
                             event["id"] = display_id
-                            logger.info(f"🛠️ tool_start - tool_use_id: {tool_use_id} → display_id: {display_id}")
+                            logger.info(
+                                f"🛠️ tool_start - tool_use_id: {tool_use_id} → display_id: {display_id}"
+                            )
                             # Reset text block so next text starts new block
                             current_text_block_id = None
 
                         elif event_type == "tool_end":
                             # Map Agent SDK tool_use_id to our display ID
                             tool_use_id = event.get("id")
-                            logger.info(f"🔧 tool_end - tool_use_id: {tool_use_id}, tool_id_map: {tool_id_map}")
+                            logger.info(
+                                f"🔧 tool_end - tool_use_id: {tool_use_id}, tool_id_map: {tool_id_map}"
+                            )
                             display_id = tool_id_map.get(tool_use_id)
                             if display_id:
                                 event["id"] = display_id
-                                logger.info(f"✅ Mapped to display_id: {display_id}")
+                                logger.info(
+                                    f"✅ Mapped to display_id: {display_id}"
+                                )
                             else:
-                                logger.warning(f"❌ No display ID for tool_use_id: {tool_use_id}")
+                                logger.warning(
+                                    f"❌ No display ID for tool_use_id: {tool_use_id}"
+                                )
 
                         elif event_type == "thinking":
                             # Create thinking block ID
                             thinking_id = f"msg-{message_counter}-thinking-0"
                             event["id"] = thinking_id
 
+                        elif event_type == "system":
+                            # Handle system messages based on subtype
+                            subtype = event.get("subtype", "")
+
+                            # 'init' subtype = metadata (tools, MCP servers, etc.) - SKIP
+                            if subtype == "init":
+                                logger.debug(
+                                    f"⏩ Skipping 'init' system message (metadata only)"
+                                )
+                                continue  # Skip metadata messages
+
+                            # 'compaction_start' = important status - SHOW
+                            # Add user-friendly message for compaction
+                            if "compact" in subtype.lower():
+                                event["content"] = (
+                                    "⚡ **Auto-Compaction Started**\n\n"
+                                    "The Claude Agent SDK is automatically summarizing older parts of the conversation "
+                                    "to make room for new interactions. This preserves recent code modifications, "
+                                    "current objectives, and project structure.\n\n"
+                                    "_Compaction happens automatically when context approaches ~95% capacity._"
+                                )
+                                logger.info(f"📦 Compaction event: {subtype}")
+
+                            # Other subtypes: Only show if they have displayable content
+                            else:
+                                has_content = any(
+                                    key in event and event[key]
+                                    for key in ["content", "message", "text"]
+                                )
+                                if not has_content:
+                                    logger.debug(
+                                        f"⏩ Skipping system message without content: subtype={subtype}"
+                                    )
+                                    continue  # Skip non-displayable messages
+
                         # Send event to client
                         await websocket.send_json(event)
 
+                # ✅ Send completion signal when query loop finishes
+                await websocket.send_json({"type": "message_complete"})
+                logger.info("✅ Query completed, sent message_complete")
+
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(e),
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": str(e),
+                    }
+                )
 
         elif msg_type == "interrupt":
             # User requested to interrupt agent execution
             logger.info("Interrupt request received")
             try:
                 await session.interrupt()
-                await websocket.send_json({
-                    "type": "interrupted",
-                    "message": "Agent execution stopped",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "interrupted",
+                        "message": "Agent execution stopped",
+                    }
+                )
                 logger.info("Agent interrupted successfully")
             except Exception as e:
                 logger.error(f"Failed to interrupt agent: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Failed to interrupt: {str(e)}",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Failed to interrupt: {str(e)}",
+                    }
+                )
 
         elif msg_type == "get_server_info":
             # User requested server info (commands, MCP tools, agents, etc.)
             logger.info("Server info request received")
             try:
                 info = await session.get_server_info()
-                await websocket.send_json({
-                    "type": "server_info",
-                    "data": info,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "server_info",
+                        "data": info,
+                    }
+                )
                 logger.info("Server info sent successfully")
             except Exception as e:
                 logger.error(f"Failed to get server info: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Failed to get server info: {str(e)}",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Failed to get server info: {str(e)}",
+                    }
+                )
 
         elif msg_type == "answer":
             # User answered an interactive question
@@ -653,9 +899,11 @@ class WebUIServerV3:
             question_service = self.question_services.get(connection_id)
             if question_service:
                 question_service.submit_answer(question_id, answers)
-                logger.info(f"Answer submitted to question service")
+                logger.info("Answer submitted to question service")
             else:
-                logger.error(f"No question service found for connection {connection_id}")
+                logger.error(
+                    f"No question service found for connection {connection_id}"
+                )
 
         else:
             logger.warning(f"Unknown message type: {msg_type}")
@@ -667,31 +915,62 @@ class WebUIServerV3:
         Args:
             reload: Enable hot reload for development
         """
+        import subprocess
+        import sys
+
         import uvicorn
 
-        logger.info(f"Starting Bassi Web UI V3 on http://{self.host}:{self.port}")
+        logger.info(
+            f"Starting Bassi Web UI V3 on http://{self.host}:{self.port}"
+        )
 
         if reload:
-            logger.info("🔥 Hot reload enabled - server will restart on file changes")
+            logger.info(
+                "🔥 Hot reload enabled - server will restart on file changes"
+            )
             logger.info("   Watching: bassi/core_v3/**/*.py")
             logger.info("   Watching: bassi/static/*.{html,css,js}")
             logger.info("")
-            logger.info("💡 Tip: Edit files and they'll auto-reload in ~2-3 seconds")
+            logger.info(
+                "💡 Tip: Edit files and they'll auto-reload in ~2-3 seconds"
+            )
             logger.info("")
 
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.host,
-            port=self.port,
-            log_level="info",
-            reload=reload,
-            reload_dirs=[str(Path(__file__).parent.parent)] if reload else None,
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
+            # Use uvicorn CLI for proper reload support with watchfiles
+            # Can't use uvicorn.Config programmatically because it requires
+            # module path string for reload to work properly
+            reload_dir = str(Path(__file__).parent.parent)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "bassi.core_v3.web_server_v3:get_app",
+                    "--factory",
+                    "--host",
+                    self.host,
+                    "--port",
+                    str(self.port),
+                    "--reload",
+                    "--reload-dir",
+                    reload_dir,
+                ],
+                check=True,
+            )
+        else:
+            config = uvicorn.Config(
+                app=self.app,
+                host=self.host,
+                port=self.port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            await server.serve()
 
 
-def create_default_session_factory() -> Callable[[InteractiveQuestionService], BassiAgentSession]:
+def create_default_session_factory() -> (
+    Callable[[InteractiveQuestionService], BassiAgentSession]
+):
     """
     Create default session factory for web UI.
 
@@ -706,6 +985,7 @@ def create_default_session_factory() -> Callable[[InteractiveQuestionService], B
 
         # Always load as dict so we can add our interactive tools
         import json
+
         mcp_servers = {}
 
         if mcp_config_path.exists():
@@ -727,20 +1007,23 @@ def create_default_session_factory() -> Callable[[InteractiveQuestionService], B
 
         bassi_tools = create_bassi_tools(question_service)
         bassi_mcp_server = create_sdk_mcp_server(
-            name="bassi-interactive",
-            version="1.0.0",
-            tools=bassi_tools
+            name="bassi-interactive", version="1.0.0", tools=bassi_tools
         )
 
         # Add our interactive tools server to the dict
         mcp_servers["bassi-interactive"] = bassi_mcp_server
 
         config = SessionConfig(
-            allowed_tools=["*"],  # Allow ALL tools including MCP, Skills, SlashCommands
+            allowed_tools=[
+                "*"
+            ],  # Allow ALL tools including MCP, Skills, SlashCommands
             system_prompt=None,  # Use default Claude Code prompt
             permission_mode="bypassPermissions",  # Bypass all permission checks
             mcp_servers=mcp_servers,
-            setting_sources=["project", "local"],  # Enable skills from project and local
+            setting_sources=[
+                "project",
+                "local",
+            ],  # Enable skills from project and local
         )
         return BassiAgentSession(config)
 
@@ -748,7 +1031,9 @@ def create_default_session_factory() -> Callable[[InteractiveQuestionService], B
 
 
 async def start_web_server_v3(
-    session_factory: Callable[[InteractiveQuestionService], BassiAgentSession] | None = None,
+    session_factory: (
+        Callable[[InteractiveQuestionService], BassiAgentSession] | None
+    ) = None,
     host: str = "localhost",
     port: int = 8765,
     reload: bool = False,
@@ -769,3 +1054,18 @@ async def start_web_server_v3(
 
     server = WebUIServerV3(session_factory, host, port)
     await server.run(reload=reload)
+
+
+# Global app instance for uvicorn CLI reload mode
+# This is only used when --reload is enabled
+_app_instance = None
+
+
+def get_app():
+    """Get or create the FastAPI app instance for uvicorn CLI"""
+    global _app_instance
+    if _app_instance is None:
+        session_factory = create_default_session_factory()
+        server = WebUIServerV3(session_factory, "localhost", 8765)
+        _app_instance = server.app
+    return _app_instance
