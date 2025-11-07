@@ -2360,10 +2360,26 @@ class BassiWebClient {
         this.totalCost += total_cost_usd
 
         // Find the current message or last message
-        const targetMessage = this.currentMessage || this.conversationEl.lastElementChild
+        let targetMessage = this.currentMessage || this.conversationEl.lastElementChild
 
+        // If no assistant message exists (e.g., /cost command with no prior conversation),
+        // create a new assistant message to display the usage stats
         if (!targetMessage || !targetMessage.classList.contains('assistant-message')) {
-            return
+            targetMessage = document.createElement('div')
+            targetMessage.className = 'assistant-message message-fade-in'
+            targetMessage.innerHTML = `
+                <div class="message-header">
+                    <span class="message-icon">🤖</span>
+                    <span>Bassi</span>
+                </div>
+                <div class="message-content">
+                    <div class="text-block">
+                        <strong>Usage Statistics</strong>
+                    </div>
+                </div>
+            `
+            this.conversationEl.appendChild(targetMessage)
+            this.currentMessage = targetMessage
         }
 
         // Check if usage stats already exist
