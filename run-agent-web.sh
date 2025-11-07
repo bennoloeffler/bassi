@@ -29,6 +29,15 @@ echo ""
 echo "Press Ctrl+C to stop"
 echo ""
 
+# Clean up any existing bassi-web processes on port 8765
+if lsof -i :8765 >/dev/null 2>&1; then
+    echo "⚠️  Cleaning up existing processes on port 8765..."
+    pkill -9 -f "bassi-web|uvicorn.*bassi.core_v3" 2>/dev/null || true
+    sleep 1
+    echo "✅ Port 8765 is now free"
+    echo ""
+fi
+
 # Enable unbuffered output for real-time streaming
 export PYTHONUNBUFFERED=1
 

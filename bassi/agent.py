@@ -11,18 +11,19 @@ Features:
 """
 
 import json
-import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+import logging
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from bassi.logging_utils import configure_logging
 from bassi.mcp_servers import (
     create_bash_mcp_server,
     create_web_search_mcp_server,
@@ -31,14 +32,8 @@ from bassi.mcp_servers.task_automation_server import (
     create_task_automation_server,
 )
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,  # Changed from DEBUG to INFO for production
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("bassi_debug.log"),
-    ],
-)
+# Setup logging once for CLI usage
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Enable DEBUG logging via environment variable

@@ -137,20 +137,27 @@ class BassiAgentSession:
             CLIConnectionError: If connection fails
         """
         import logging
+
         logger = logging.getLogger(__name__)
 
-        logger.info(f"🔶 [SESSION] connect() called, _connected={self._connected}")
+        logger.info(
+            f"🔶 [SESSION] connect() called, _connected={self._connected}"
+        )
         if self._connected:
-            logger.info(f"🔶 [SESSION] Already connected, returning")
+            logger.info("🔶 [SESSION] Already connected, returning")
             return
 
-        logger.info(f"🔶 [SESSION] Creating ClaudeSDKClient with options: {self.sdk_options}")
+        logger.info(
+            f"🔶 [SESSION] Creating ClaudeSDKClient with options: {self.sdk_options}"
+        )
         self.client = ClaudeSDKClient(options=self.sdk_options)
-        logger.info(f"🔶 [SESSION] ClaudeSDKClient created, calling client.connect()...")
+        logger.info(
+            "🔶 [SESSION] ClaudeSDKClient created, calling client.connect()..."
+        )
         await self.client.connect()
-        logger.info(f"🔶 [SESSION] client.connect() completed successfully")
+        logger.info("🔶 [SESSION] client.connect() completed successfully")
         self._connected = True
-        logger.info(f"🔶 [SESSION] Session connected")
+        logger.info("🔶 [SESSION] Session connected")
 
     async def disconnect(self):
         """Disconnect from Claude Code"""
@@ -180,7 +187,7 @@ class BassiAgentSession:
             "type": "user",
             "message": {
                 "role": "user",
-                "content": content_blocks  # Pass content blocks directly (Anthropic API format)
+                "content": content_blocks,  # Pass content blocks directly (Anthropic API format)
             },
             "parent_tool_use_id": None,
             "session_id": session_id,

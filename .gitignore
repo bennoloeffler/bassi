@@ -1,3 +1,4 @@
+chats/
 # Python
 __pycache__/
 *.py[cod]
@@ -63,6 +64,8 @@ Thumbs.db
 .bassi/
 
 # Agent working directories
-_RESULTS_FROM_AGENT/
+_DATA_FROM_USER/
 _DOWNLOADS_FROM_AGENT/
+_RESULTS_FROM_AGENT/
+_SCRIPTS_FROM_AGENT/
 bin/

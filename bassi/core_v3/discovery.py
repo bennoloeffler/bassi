@@ -157,7 +157,9 @@ class BassiDiscovery:
         from datetime import datetime
 
         lines = []
-        lines.append(f"⏰ Discovery run at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(
+            f"⏰ Discovery run at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         lines.append("")
         lines.append("=" * 70)
         lines.append("BASSI DISCOVERY - Available Capabilities")

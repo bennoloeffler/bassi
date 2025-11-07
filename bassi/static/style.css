@@ -1120,6 +1120,474 @@ body.hide-thinking .thinking-block {
     line-height: 1.6;
 }
 
+/* ========== File Area ========== */
+
+.file-area {
+    position: sticky;
+    bottom: 120px; /* Above input container */
+    background: var(--bg-overlay);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    z-index: 50;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.file-area-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md) var(--spacing-lg);
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+}
+
+.file-area-header:hover {
+    background: var(--bg-hover);
+}
+
+.file-area-title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.file-icon {
+    font-size: 1.25rem;
+}
+
+.file-area-toggle {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    font-size: 0.875rem;
+    transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.file-area-toggle:hover {
+    color: var(--text-primary);
+}
+
+.file-area-toggle.expanded {
+    transform: rotate(180deg);
+}
+
+.file-area-content {
+    max-height: 300px;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+}
+
+.file-list {
+    padding: var(--spacing-sm) var(--spacing-lg);
+}
+
+.file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: var(--spacing-sm);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.file-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-blue);
+}
+
+.file-item:last-child {
+    margin-bottom: 0;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    flex: 1;
+    min-width: 0; /* Allow text truncation */
+}
+
+.file-type-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.file-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.file-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-meta {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.file-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+}
+
+.file-action-button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    transition: all var(--transition-fast);
+}
+
+.file-action-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+.file-action-button.delete:hover {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.file-list-empty {
+    padding: var(--spacing-xl);
+    text-align: center;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ========== File Chips Inside Input (ChatGPT/Claude.ai Pattern) ========== */
+
+.file-chips-container {
+    /* Container inside input wrapper */
+    background: var(--bg-elevated);
+    border-radius: 12px 12px 0 0;
+    border: 2px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0;
+    overflow: hidden;
+
+    /* Hide when empty */
+    display: none;
+}
+
+.file-chips-container.has-files {
+    display: block;
+}
+
+.file-chips-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+}
+
+.file-chips-count {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.file-chips-include-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color var(--transition-fast);
+}
+
+.file-chips-include-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.file-chips-include-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent-blue);
+}
+
+.file-chips-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    transition: transform var(--transition-fast);
+}
+
+.file-chips-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.file-chips-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.file-chips-grid.collapsed {
+    display: none;
+}
+
+/* Individual File Chip */
+.file-chip {
+    /* Small pill-shaped chip */
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    font-size: 12px;
+    color: var(--text-primary);
+    max-width: 300px;
+    transition: all var(--transition-fast);
+    cursor: default;
+    position: relative;
+}
+
+/* Image chips have vertical layout with thumbnail */
+.file-chip:has(.file-chip-thumbnail) {
+    flex-direction: column;
+    align-items: center;
+    padding: 8px;
+    max-width: 120px;
+    gap: 4px;
+}
+
+.file-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.file-chip-thumbnail {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.file-chip-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.file-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    max-width: 180px;
+}
+
+/* Name in image chips should be centered and smaller */
+.file-chip:has(.file-chip-thumbnail) .file-chip-name {
+    text-align: center;
+    font-size: 10px;
+    max-width: 100px;
+    width: 100%;
+}
+
+.file-chip-size {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 2px;
+}
+
+/* Size in image chips should be centered and smaller */
+.file-chip:has(.file-chip-thumbnail) .file-chip-size {
+    text-align: center;
+    width: 100%;
+    margin-left: 0;
+    font-size: 9px;
+}
+
+.file-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0.6;
+    transition: all var(--transition-fast);
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* Remove button in image chips should be positioned absolutely at top-right */
+.file-chip:has(.file-chip-thumbnail) .file-chip-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    color: white;
+}
+
+.file-chip-remove:hover {
+    opacity: 1;
+    color: var(--accent-red);
+    transform: scale(1.1);
+}
+
+/* File Preview Tooltip (Claude.ai style) */
+.file-preview-tooltip {
+    position: fixed;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    pointer-events: none;
+    max-width: 300px;
+    animation: tooltip-fade-in 0.2s ease;
+}
+
+@keyframes tooltip-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.file-preview-tooltip img {
+    width: 100%;
+    height: auto;
+    max-height: 200px;
+    object-fit: contain;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.tooltip-file-icon {
+    font-size: 48px;
+    text-align: center;
+    padding: 20px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.tooltip-file-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+    word-break: break-all;
+}
+
+/* Message Files Toggle (Inline Display) */
+.message-files-toggle {
+    /* Toggle button to show/hide files */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #2a2d33;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 8px;
+    color: #888;
+    font-size: 13px;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.message-files-toggle:hover {
+    background: #3a3d43;
+    color: #e0e0e0;
+}
+
+.message-files-toggle.expanded {
+    color: #e0e0e0;
+}
+
+.message-files {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.message-files.collapsed {
+    display: none;
+}
+
+.message-file-thumbnail {
+    /* Same styling as staging thumbnails but without remove button */
+    width: 120px;
+    height: 140px;
+    border-radius: 8px;
+    border: 1px solid #3a3f47;
+    background: #1e1e1e;
+    padding: 8px;
+    position: relative;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.message-file-thumbnail:hover {
+    border-color: var(--accent-blue);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+}
+
 /* ========== Input Area ========== */
 
 .input-container {
@@ -1193,8 +1661,21 @@ body.hide-thinking .thinking-block {
     max-width: 900px;
     margin: 0 auto;
     display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+/* Input area with textarea and buttons */
+.input-area {
+    display: flex;
     gap: var(--spacing-md);
     align-items: flex-end;
+}
+
+/* When file chips are present, adjust the textarea border radius */
+.file-chips-container.has-files + .input-area #message-input {
+    border-radius: 0 0 12px 12px;
+    border-top: none;
 }
 
 #message-input {
@@ -2444,6 +2925,52 @@ details[open] .tools-grid {
 .button-group {
     display: flex;
     gap: var(--spacing-sm);
+}
+
+/* Upload Button (Modern Circular Design) */
+#upload-button {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 1.3rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+#upload-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    border-radius: 50%;
+}
+
+#upload-button:hover {
+    border-color: var(--accent-blue);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+}
+
+#upload-button:hover::before {
+    opacity: 0.15;
+}
+
+#upload-button:active {
+    transform: translateY(0);
 }
 
 /* Stop Button (Red) */

@@ -62,20 +62,42 @@
     <!-- Input Area -->
     <div class="input-container">
         <div class="input-wrapper">
-            <textarea
-                id="message-input"
-                placeholder="Ask me anything..."
-                rows="1"
-                autocomplete="off"
-                spellcheck="true"
-            ></textarea>
-            <div class="button-group">
-                <button id="stop-button" style="display: none;" title="Stop agent execution">
-                    ⏹
-                </button>
-                <button id="send-button" disabled>
-                    Send
-                </button>
+            <!-- File Chips Container (ChatGPT/Claude.ai pattern) -->
+            <div id="file-chips-container" class="file-chips-container" style="display: none;">
+                <div class="file-chips-header">
+                    <span class="file-chips-count"></span>
+                    <label class="file-chips-include-toggle" title="Include files in next message">
+                        <input type="checkbox" id="include-files-toggle" checked>
+                        <span>Include in message</span>
+                    </label>
+                    <button class="file-chips-toggle" title="Toggle file display">▼</button>
+                </div>
+                <div id="file-chips-grid" class="file-chips-grid">
+                    <!-- File chips will appear here as small pills -->
+                </div>
+            </div>
+
+            <!-- Input Area Components -->
+            <div class="input-area">
+                <textarea
+                    id="message-input"
+                    placeholder="Ask me anything..."
+                    rows="1"
+                    autocomplete="off"
+                    spellcheck="true"
+                ></textarea>
+                <div class="button-group">
+                    <input type="file" id="file-input" style="display: none;" multiple>
+                    <button id="upload-button" title="Upload files">
+                        📎
+                    </button>
+                    <button id="stop-button" style="display: none;" title="Stop agent execution">
+                        ⏹
+                    </button>
+                    <button id="send-button" disabled>
+                        Send
+                    </button>
+                </div>
             </div>
         </div>
     </div>

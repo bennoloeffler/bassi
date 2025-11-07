@@ -31,6 +31,7 @@ class BassiWebClient {
         this.verboseLevel = this.loadVerboseLevel()
         this.isAgentWorking = false          // Track if agent is processing
         this.sessionCapabilities = null      // Capabilities from init system message
+        this.sessionId = null                // Current session ID from WebSocket connection
 
         // Autocomplete state
         this.commandRegistry = []            // All available commands
@@ -44,8 +45,8 @@ class BassiWebClient {
         this.renderDebounceTimers = new Map()  // id -> timer
 
         // File handling
-        this.pendingImages = []                  // Images to send with next message (legacy, kept for compatibility)
-        this.pendingFiles = []                   // All files to send (images, PDFs, documents)
+        this.stagedFiles = []                    // Files uploaded to server (shown as chips)
+        this.pendingFiles = []                   // Files waiting for session ID
         this.dragCounter = 0                     // Track drag enter/leave events
 
         // DOM elements
@@ -58,6 +59,16 @@ class BassiWebClient {
         this.connectionStatus = document.getElementById('connection-status')
         this.serverStatus = document.getElementById('server-status')
         this.statusText = document.getElementById('status-text')
+
+        this.fileInput = document.getElementById('file-input')
+        this.uploadButton = document.getElementById('upload-button')
+
+        // File chips elements (ChatGPT/Claude.ai pattern)
+        this.fileChipsContainer = document.getElementById('file-chips-container')
+        this.fileChipsGrid = document.getElementById('file-chips-grid')
+        this.fileChipsCount = document.querySelector('.file-chips-count')
+        this.fileChipsToggle = document.querySelector('.file-chips-toggle')
+        this.includeFilesToggle = document.getElementById('include-files-toggle')
 
         this.init()
     }
@@ -118,6 +129,17 @@ class BassiWebClient {
 
         // Set initial verbose level CSS class
         this.conversationEl.classList.add(`verbose-${this.verboseLevel}`)
+
+        // File upload button
+        if (this.uploadButton && this.fileInput) {
+            this.uploadButton.addEventListener('click', () => {
+                this.fileInput.click()
+            })
+
+            this.fileInput.addEventListener('change', async (e) => {
+                await this.handleFileSelect(e)
+            })
+        }
 
         // Initialize settings
         this.initSettings()
@@ -612,49 +634,37 @@ class BassiWebClient {
             })
         }
 
-        // Add images if present (legacy pendingImages for backward compatibility)
-        for (const img of this.pendingImages) {
-            contentBlocks.push({
-                type: 'image',
-                source: {
-                    type: 'base64',
-                    media_type: img.media_type,
-                    data: img.data
-                },
-                filename: img.filename
-            })
-        }
 
-        // Add files (PDFs and documents) from pendingFiles
-        for (const file of this.pendingFiles) {
-            if (file.type === 'image') {
-                // Image from drag & drop
-                contentBlocks.push({
-                    type: 'image',
-                    source: {
-                        type: 'base64',
-                        media_type: file.media_type,
-                        data: file.data
-                    },
-                    filename: file.filename
-                })
-            } else if (file.type === 'pdf') {
-                // PDF as document block
-                contentBlocks.push({
-                    type: 'document',
-                    source: {
-                        type: 'base64',
-                        media_type: 'application/pdf',
-                        data: file.data
-                    },
-                    filename: file.filename
-                })
-            } else if (file.type === 'document') {
-                // Document as text reference (Claude will use Read tool)
-                contentBlocks.push({
-                    type: 'text',
-                    text: `[Attached file: ${file.filename} (${(file.size / 1024).toFixed(1)} KB) - saved to ${file.saved_path}]`
-                })
+        // Add files from staging area (file chips) - only if toggle is checked
+        if (this.includeFilesToggle && this.includeFilesToggle.checked) {
+            for (const file of this.stagedFiles) {
+                if (file.type === 'image' && file.data) {
+                    // Image with base64 data
+                    contentBlocks.push({
+                        type: 'image',
+                        source: {
+                            type: 'base64',
+                            media_type: file.media_type,
+                            data: file.data
+                        }
+                    })
+                } else if (file.type === 'pdf' && file.data) {
+                    // PDF as document block with base64 data
+                    contentBlocks.push({
+                        type: 'document',
+                        source: {
+                            type: 'base64',
+                            media_type: 'application/pdf',
+                            data: file.data
+                        }
+                    })
+                } else {
+                    // Other files as text reference (Claude will use Read tool)
+                    contentBlocks.push({
+                        type: 'text',
+                        text: `[Attached file: ${file.filename} (${this.formatFileSize(file.size)}) - saved to ${file.saved_path}]`
+                    })
+                }
             }
         }
 
@@ -678,8 +688,9 @@ class BassiWebClient {
             this.blocks.clear()
             this.textBuffers.clear()
         } else {
-            // Display user message with images
-            this.addUserMessageWithImages(content, this.pendingImages)
+            // Display user message with files (only if toggle is checked)
+            const displayFiles = (this.includeFilesToggle && this.includeFilesToggle.checked) ? this.stagedFiles : []
+            this.addUserMessageWithImages(content, [], displayFiles)
             // Reset currentMessage for new conversation
             this.currentMessage = null
             this.blocks.clear()
@@ -694,13 +705,12 @@ class BassiWebClient {
 
         console.log(`📤 Sent ${messageType}:`, contentBlocks.length === 1 ? 'text-only' : `${contentBlocks.length} blocks`)
 
-        // Clear input, images, files, and reset height
+        // Clear input and reset height (but keep files attached)
         this.messageInput.value = ''
         this.messageInput.style.height = 'auto'
-        this.pendingImages = []
-        this.pendingFiles = []
-        this.renderImagePreviews()
-        this.renderFilePreviews()
+        // Keep stagedFiles - they persist across messages until user removes them
+        // this.stagedFiles = []  // Don't clear - files stay attached
+        this.renderFileChips()  // Re-render chips to show they're still attached
 
         // If this was a regular message, set agent working
         if (messageType === 'user_message') {
@@ -745,108 +755,21 @@ class BassiWebClient {
         }
     }
 
-    addImageToMessage(file) {
+    async addImageToMessage(file) {
         // Validate size (5MB limit)
         if (file.size > 5 * 1024 * 1024) {
             alert('Image too large. Maximum size is 5MB per image.')
             return
         }
 
-        // Convert to base64
-        const reader = new FileReader()
-        reader.onload = (e) => {
-            const dataUrl = e.target.result
-            const [header, base64Data] = dataUrl.split(',')
-            const mediaType = header.match(/:(.*?);/)[1]
+        // Upload to server first
+        const uploadResult = await this.uploadFile(file)
+        if (!uploadResult) return
 
-            // Validate media type
-            const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp']
-            if (!allowedTypes.includes(mediaType)) {
-                alert(`Unsupported image format: ${mediaType}. Please use PNG, JPEG, GIF, or WebP.`)
-                return
-            }
-
-            // Store image data
-            const imageData = {
-                data: base64Data,
-                media_type: mediaType,
-                size: file.size,
-                filename: `screenshot_${Date.now()}.${mediaType.split('/')[1]}`
-            }
-
-            this.pendingImages.push(imageData)
-
-            console.log(`📷 Image added: ${imageData.filename} (${(file.size / 1024).toFixed(1)} KB)`)
-
-            // Show preview
-            this.renderImagePreviews()
-        }
-        reader.onerror = (error) => {
-            console.error('Failed to read image file:', error)
-            alert('Failed to read image file. Please try again.')
-        }
-        reader.readAsDataURL(file)
+        // Add to file chips (new system)
+        await this.addFileToStaging(file, uploadResult)
     }
 
-    renderImagePreviews() {
-        // Get or create preview container
-        let previewContainer = document.getElementById('image-preview-container')
-        if (!previewContainer) {
-            // Create it before the input wrapper
-            const inputContainer = document.querySelector('.input-container')
-            const inputWrapper = document.querySelector('.input-wrapper')
-
-            previewContainer = document.createElement('div')
-            previewContainer.id = 'image-preview-container'
-            previewContainer.className = 'image-preview-container'
-
-            const previewsDiv = document.createElement('div')
-            previewsDiv.className = 'image-previews'
-            previewContainer.appendChild(previewsDiv)
-
-            inputContainer.insertBefore(previewContainer, inputWrapper)
-        }
-
-        const previewsDiv = previewContainer.querySelector('.image-previews')
-
-        // Clear existing previews
-        previewsDiv.innerHTML = ''
-
-        if (this.pendingImages.length === 0) {
-            previewContainer.style.display = 'none'
-            return
-        }
-
-        previewContainer.style.display = 'block'
-
-        // Render each image preview
-        this.pendingImages.forEach((img, index) => {
-            const previewEl = document.createElement('div')
-            previewEl.className = 'image-preview'
-
-            const imgEl = document.createElement('img')
-            imgEl.src = `data:${img.media_type};base64,${img.data}`
-            imgEl.alt = img.filename
-
-            const removeBtn = document.createElement('button')
-            removeBtn.className = 'image-preview-remove'
-            removeBtn.textContent = '×'
-            removeBtn.title = 'Remove image'
-            removeBtn.onclick = () => {
-                this.removeImage(index)
-            }
-
-            previewEl.appendChild(imgEl)
-            previewEl.appendChild(removeBtn)
-            previewsDiv.appendChild(previewEl)
-        })
-    }
-
-    removeImage(index) {
-        this.pendingImages.splice(index, 1)
-        this.renderImagePreviews()
-        console.log(`🗑️ Image removed (${this.pendingImages.length} remaining)`)
-    }
 
     // === Drag & Drop Handlers ===
 
@@ -938,7 +861,7 @@ class BassiWebClient {
 
         if (fileType === 'image') {
             // Handle images (small, base64 inline)
-            this.addImageToMessage(file)
+            await this.addImageToMessage(file)
         } else if (fileType === 'pdf') {
             // Handle PDFs (upload to server, then base64 encode)
             await this.addPDFToMessage(file)
@@ -986,32 +909,8 @@ class BassiWebClient {
         const uploadResult = await this.uploadFile(file)
         if (!uploadResult) return
 
-        // Convert to base64 for sending to Claude
-        const reader = new FileReader()
-        reader.onload = (e) => {
-            const dataUrl = e.target.result
-            const [header, base64Data] = dataUrl.split(',')
-
-            const fileData = {
-                type: 'pdf',
-                data: base64Data,
-                media_type: 'application/pdf',
-                size: file.size,
-                filename: file.name,
-                saved_path: uploadResult.path
-            }
-
-            this.pendingFiles.push(fileData)
-            console.log(`📄 PDF added: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
-
-            // Show preview
-            this.renderFilePreviews()
-        }
-        reader.onerror = (error) => {
-            console.error('Failed to read PDF file:', error)
-            alert('Failed to read PDF file. Please try again.')
-        }
-        reader.readAsDataURL(file)
+        // Add to file chips (new system)
+        await this.addFileToStaging(file, uploadResult)
     }
 
     async addDocumentToMessage(file) {
@@ -1025,25 +924,50 @@ class BassiWebClient {
         const uploadResult = await this.uploadFile(file)
         if (!uploadResult) return
 
-        const fileData = {
-            type: 'document',
-            filename: file.name,
-            media_type: file.type,
-            size: file.size,
-            saved_path: uploadResult.path
+        // Add to file chips (new system)
+        await this.addFileToStaging(file, uploadResult)
+    }
+
+    async handleFileSelect(event) {
+        /**
+         * Handle file selection from file input button.
+         */
+        const files = event.target.files
+        if (!files || files.length === 0) return
+
+        console.log(`📁 ${files.length} file(s) selected via button`)
+
+        // If session isn't ready yet, queue files for later processing
+        if (!this.sessionId) {
+            console.log('⏳ Session not ready, queueing files...')
+            for (const file of files) {
+                this.pendingFiles.push(file)
+            }
+            event.target.value = ''
+            return
         }
 
-        this.pendingFiles.push(fileData)
-        console.log(`📎 Document added: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
+        // Process each file (upload + add to staging)
+        for (const file of files) {
+            await this.processDroppedFile(file)
+        }
 
-        // Show preview
-        this.renderFilePreviews()
+        // Clear file input so same file can be selected again
+        event.target.value = ''
     }
 
     async uploadFile(file) {
         try {
+            // Validate session ID is available
+            if (!this.sessionId) {
+                throw new Error('Session not initialized. Please wait for connection.')
+            }
+
             const formData = new FormData()
             formData.append('file', file)
+            formData.append('session_id', this.sessionId)
+
+            console.log(`📤 Uploading file to session ${this.sessionId.substring(0, 8)}...`)
 
             const response = await fetch('/api/upload', {
                 method: 'POST',
@@ -1051,11 +975,13 @@ class BassiWebClient {
             })
 
             if (!response.ok) {
-                throw new Error(`Upload failed: ${response.statusText}`)
+                const errorData = await response.json().catch(() => ({}))
+                throw new Error(errorData.error || `Upload failed: ${response.statusText}`)
             }
 
             const result = await response.json()
             console.log(`✅ File uploaded: ${result.path}`)
+
             return result
 
         } catch (error) {
@@ -1065,78 +991,360 @@ class BassiWebClient {
         }
     }
 
-    renderFilePreviews() {
-        // Combine images and files for unified preview
-        // For now, keep using the existing renderImagePreviews for images
-        // and add a new preview area for other files
+    // ========== File Area Management (New Staging System) ==========
 
-        // Get or create file preview container
-        let previewContainer = document.getElementById('file-preview-container')
-        if (!previewContainer) {
-            const inputContainer = document.querySelector('.input-container')
-            const inputWrapper = document.querySelector('.input-wrapper')
+    getFileIcon(filename) {
+        /**
+         * Get emoji icon for file type based on extension.
+         *
+         * Args:
+         *     filename: Name of the file
+         *
+         * Returns:
+         *     String emoji icon
+         */
+        const ext = filename.toLowerCase().split('.').pop()
 
-            previewContainer = document.createElement('div')
-            previewContainer.id = 'file-preview-container'
-            previewContainer.className = 'file-preview-container'
+        const iconMap = {
+            // Images
+            'png': '🖼️',
+            'jpg': '🖼️',
+            'jpeg': '🖼️',
+            'gif': '🖼️',
+            'webp': '🖼️',
+            'svg': '🖼️',
 
-            const previewsDiv = document.createElement('div')
-            previewsDiv.className = 'file-previews'
-            previewContainer.appendChild(previewsDiv)
+            // Documents
+            'pdf': '📄',
+            'doc': '📝',
+            'docx': '📝',
+            'txt': '📝',
+            'md': '📝',
 
-            inputContainer.insertBefore(previewContainer, inputWrapper)
+            // Spreadsheets
+            'xls': '📊',
+            'xlsx': '📊',
+            'csv': '📊',
+
+            // Presentations
+            'ppt': '📽️',
+            'pptx': '📽️',
+
+            // Archives
+            'zip': '📦',
+            'tar': '📦',
+            'gz': '📦',
+            '7z': '📦',
+
+            // Code
+            'py': '🐍',
+            'js': '📜',
+            'ts': '📜',
+            'html': '🌐',
+            'css': '🎨',
+            'json': '📋',
+            'yaml': '📋',
+            'yml': '📋'
         }
 
-        const previewsDiv = previewContainer.querySelector('.file-previews')
-        previewsDiv.innerHTML = ''
+        return iconMap[ext] || '📎'
+    }
 
-        if (this.pendingFiles.length === 0) {
-            previewContainer.style.display = 'none'
+    formatFileSize(bytes) {
+        /**
+         * Format file size in human-readable format.
+         *
+         * Args:
+         *     bytes: File size in bytes
+         *
+         * Returns:
+         *     Formatted string (e.g., "1.5 MB")
+         */
+        if (bytes === 0) return '0 Bytes'
+
+        const k = 1024
+        const sizes = ['Bytes', 'KB', 'MB', 'GB']
+        const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+        return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+    }
+
+
+    // ========== File Staging Area (New Design) ==========
+
+    getFileIcon(filename) {
+        /**
+         * Get appropriate emoji icon for file type.
+         */
+        const ext = filename.toLowerCase().split('.').pop()
+
+        // Images
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+            return '🖼️'
+        }
+        // PDFs
+        if (ext === 'pdf') {
+            return '📕'
+        }
+        // Documents
+        if (['doc', 'docx'].includes(ext)) {
+            return '📘'
+        }
+        // Spreadsheets
+        if (['xls', 'xlsx', 'csv'].includes(ext)) {
+            return '📗'
+        }
+        // Presentations
+        if (['ppt', 'pptx'].includes(ext)) {
+            return '📙'
+        }
+        // Text files
+        if (['txt', 'md', 'log'].includes(ext)) {
+            return '📝'
+        }
+        // Code files
+        if (['py', 'js', 'ts', 'jsx', 'tsx', 'java', 'cpp', 'c', 'h', 'css', 'html', 'json', 'xml', 'yaml', 'yml'].includes(ext)) {
+            return '💻'
+        }
+        // Archives
+        if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) {
+            return '📦'
+        }
+        // Default
+        return '📄'
+    }
+
+    renderFileChips() {
+        /**
+         * Render file chips inside input wrapper (ChatGPT/Claude.ai pattern).
+         * Files are uploaded immediately to server, chips show what will be sent to Claude.
+         */
+        if (!this.fileChipsContainer || !this.fileChipsGrid) {
+            console.warn('⚠️ File chips elements not found')
             return
         }
 
-        previewContainer.style.display = 'block'
+        // Clear existing chips
+        this.fileChipsGrid.innerHTML = ''
 
-        // Render each file preview
-        this.pendingFiles.forEach((file, index) => {
-            const previewEl = document.createElement('div')
-            previewEl.className = 'file-preview'
+        // Hide if no files
+        if (this.stagedFiles.length === 0) {
+            this.fileChipsContainer.style.display = 'none'
+            this.fileChipsContainer.classList.remove('has-files')
+            return
+        }
 
-            // Get icon based on type
-            let icon = '📄'
-            if (file.type === 'pdf') icon = '📕'
-            else if (file.type === 'document') {
-                if (file.filename.endsWith('.docx') || file.filename.endsWith('.doc')) icon = '📘'
-                else if (file.filename.endsWith('.xlsx') || file.filename.endsWith('.xls')) icon = '📗'
-                else if (file.filename.endsWith('.pptx') || file.filename.endsWith('.ppt')) icon = '📙'
-                else if (file.filename.endsWith('.txt')) icon = '📝'
+        // Show chips container
+        this.fileChipsContainer.style.display = 'block'
+        this.fileChipsContainer.classList.add('has-files')
+
+        // Update file count
+        if (this.fileChipsCount) {
+            const fileText = this.stagedFiles.length === 1 ? 'file' : 'files'
+            this.fileChipsCount.textContent = `${this.stagedFiles.length} ${fileText}`
+        }
+
+        // Setup toggle functionality
+        if (this.fileChipsToggle && !this.fileChipsToggle.hasListener) {
+            this.fileChipsToggle.hasListener = true
+            const header = this.fileChipsContainer.querySelector('.file-chips-header')
+            if (header) {
+                header.onclick = () => {
+                    this.fileChipsGrid.classList.toggle('collapsed')
+                    this.fileChipsToggle.classList.toggle('collapsed')
+                }
+            }
+        }
+
+        // Render each file as a small chip
+        this.stagedFiles.forEach((file, index) => {
+            const chip = document.createElement('div')
+            chip.className = 'file-chip'
+            chip.dataset.fileId = file.id
+
+            // Add tooltip with full name and size
+            const fullInfo = `${file.filename}\nSize: ${this.formatFileSize(file.size)}\nLocation: ${file.saved_path}`
+            chip.title = fullInfo
+
+            // For images: show thumbnail
+            if (file.type === 'image' && file.data) {
+                const thumbnail = document.createElement('img')
+                thumbnail.className = 'file-chip-thumbnail'
+                thumbnail.src = `data:${file.media_type};base64,${file.data}`
+                thumbnail.alt = file.filename
+                chip.appendChild(thumbnail)
+
+                // File name below thumbnail
+                const name = document.createElement('span')
+                name.className = 'file-chip-name'
+                name.textContent = file.filename
+                chip.appendChild(name)
+
+                // File size below name
+                const size = document.createElement('span')
+                size.className = 'file-chip-size'
+                size.textContent = this.formatFileSize(file.size)
+                chip.appendChild(size)
+            } else {
+                // For non-images: show icon + name
+                const icon = document.createElement('span')
+                icon.className = 'file-chip-icon'
+                icon.textContent = this.getFileIcon(file.filename)
+                chip.appendChild(icon)
+
+                // File name (truncated)
+                const name = document.createElement('span')
+                name.className = 'file-chip-name'
+                name.textContent = file.filename
+                chip.appendChild(name)
+
+                // File size
+                const size = document.createElement('span')
+                size.className = 'file-chip-size'
+                size.textContent = `(${this.formatFileSize(file.size)})`
+                chip.appendChild(size)
             }
 
-            previewEl.innerHTML = `
-                <div class="file-preview-icon">${icon}</div>
-                <div class="file-preview-info">
-                    <div class="file-preview-name">${file.filename}</div>
-                    <div class="file-preview-size">${(file.size / 1024).toFixed(1)} KB</div>
-                </div>
-            `
-
-            const removeBtn = document.createElement('button')
-            removeBtn.className = 'file-preview-remove'
+            // Remove button (for both types)
+            const removeBtn = document.createElement('span')
+            removeBtn.className = 'file-chip-remove'
             removeBtn.textContent = '×'
             removeBtn.title = 'Remove file'
-            removeBtn.onclick = () => {
-                this.removeFile(index)
+            removeBtn.onclick = (e) => {
+                e.stopPropagation()
+                this.removeFromStaging(file.id)
             }
+            chip.appendChild(removeBtn)
 
-            previewEl.appendChild(removeBtn)
-            previewsDiv.appendChild(previewEl)
+            // Add hover preview tooltip
+            chip.addEventListener('mouseenter', () => {
+                this.showPreviewTooltip(file, chip)
+            })
+            chip.addEventListener('mouseleave', () => {
+                this.hidePreviewTooltip()
+            })
+
+            this.fileChipsGrid.appendChild(chip)
+        })
+
+        console.log(`📎 File chips updated: ${this.stagedFiles.length} file(s) attached`)
+    }
+
+    removeFromStaging(fileId) {
+        /**
+         * Remove a file from the attached files.
+         */
+        const index = this.stagedFiles.findIndex(f => f.id === fileId)
+        if (index !== -1) {
+            const file = this.stagedFiles[index]
+            this.stagedFiles.splice(index, 1)
+            console.log(`🗑️ Removed file: ${file.filename}`)
+            this.renderFileChips()
+        }
+    }
+
+    async addFileToStaging(file, uploadResult) {
+        /**
+         * Add a file to attached files after successful upload.
+         * File is already uploaded to server, chip shows it will be sent to Claude.
+         */
+        const fileType = this.getFileType(file)
+
+        const fileData = {
+            id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            filename: file.name,
+            size: file.size,
+            type: fileType,
+            saved_path: uploadResult.path,
+            media_type: file.type,
+            data: null  // Will be set for images and PDFs (base64)
+        }
+
+        // For images and PDFs, encode as base64 for sending to Claude
+        if (fileType === 'image' || fileType === 'pdf') {
+            try {
+                const dataUrl = await this.fileToDataUrl(file)
+                const [header, base64Data] = dataUrl.split(',')
+                fileData.data = base64Data
+                fileData.media_type = header.match(/:(.*?);/)[1]
+            } catch (error) {
+                console.warn('Failed to encode file as base64:', error)
+            }
+        }
+
+        this.stagedFiles.push(fileData)
+        console.log(`📎 File attached: ${file.name} (uploaded to server)`)
+        this.renderFileChips()
+    }
+
+    fileToDataUrl(file) {
+        /**
+         * Convert a File object to a data URL for preview.
+         */
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result)
+            reader.onerror = reject
+            reader.readAsDataURL(file)
         })
     }
 
-    removeFile(index) {
-        this.pendingFiles.splice(index, 1)
-        this.renderFilePreviews()
-        console.log(`🗑️ File removed (${this.pendingFiles.length} remaining)`)
+    showPreviewTooltip(file, chipElement) {
+        /**
+         * Show a preview tooltip when hovering over a file chip (Claude.ai style).
+         */
+        // Remove existing tooltip
+        this.hidePreviewTooltip()
+
+        const tooltip = document.createElement('div')
+        tooltip.className = 'file-preview-tooltip'
+        tooltip.id = 'file-preview-tooltip'
+
+        // Add preview image for image files
+        if (file.type === 'image' && file.data) {
+            // Reconstruct data URL from base64 data
+            const dataUrl = `data:${file.media_type};base64,${file.data}`
+            const previewImg = document.createElement('img')
+            previewImg.src = dataUrl
+            previewImg.alt = file.filename
+            tooltip.appendChild(previewImg)
+        } else {
+            // Show file icon for non-images
+            const iconDiv = document.createElement('div')
+            iconDiv.className = 'tooltip-file-icon'
+            iconDiv.textContent = this.getFileIcon(file.filename)
+            tooltip.appendChild(iconDiv)
+        }
+
+        // Add filename and size info
+        const infoDiv = document.createElement('div')
+        infoDiv.className = 'tooltip-file-info'
+        infoDiv.textContent = `${file.filename} (${this.formatFileSize(file.size)})`
+        tooltip.appendChild(infoDiv)
+
+        // Position tooltip above the chip
+        document.body.appendChild(tooltip)
+        const chipRect = chipElement.getBoundingClientRect()
+        const tooltipRect = tooltip.getBoundingClientRect()
+
+        // Center horizontally above chip
+        const left = chipRect.left + (chipRect.width / 2) - (tooltipRect.width / 2)
+        const top = chipRect.top - tooltipRect.height - 8  // 8px gap
+
+        tooltip.style.left = Math.max(10, left) + 'px'  // Keep on screen
+        tooltip.style.top = Math.max(10, top) + 'px'
+
+        this.currentTooltip = tooltip
+    }
+
+    hidePreviewTooltip() {
+        /**
+         * Hide the file preview tooltip.
+         */
+        if (this.currentTooltip) {
+            this.currentTooltip.remove()
+            this.currentTooltip = null
+        }
     }
 
     setAgentWorking(working) {
@@ -1185,7 +1393,7 @@ class BassiWebClient {
         this.scrollToBottom()
     }
 
-    addUserMessageWithImages(content, images) {
+    addUserMessageWithImages(content, images, files = []) {
         const messageEl = document.createElement('div')
         messageEl.className = 'user-message message-fade-in'
 
@@ -1216,8 +1424,14 @@ class BassiWebClient {
             messageHtml += '</div>'
         }
 
+        // NOTE: Files are NOT displayed in the message bubble
+        // They only appear as chips in the input wrapper before sending
+        // This prevents files from "flowing up" into the conversation history
+        // Files are still attached to the message and sent to Claude
+
         messageEl.innerHTML = messageHtml
         this.conversationEl.appendChild(messageEl)
+
         this.scrollToBottom()
     }
 
@@ -1279,13 +1493,18 @@ class BassiWebClient {
 
     // ========== Message Handling (Core) ==========
 
-    handleMessage(msg) {
+    async handleMessage(msg) {
         console.log('📨 Received:', msg.type, msg.id || '', msg)
         console.log('🔷 [FRONTEND] Handling message type:', msg.type)
 
         switch (msg.type) {
             case 'connected':
                 console.log('🔷 [FRONTEND] Got "connected" event, Session ID:', msg.session_id)
+
+                // Store session ID for file uploads and session management
+                this.sessionId = msg.session_id
+                console.log('✅ [FRONTEND] Session ID stored:', this.sessionId)
+
                 // Clear any old messages from previous session
                 this.conversationEl.innerHTML = ''
                 console.log('🔷 [FRONTEND] Calling showWelcomeMessage()...')
@@ -1294,6 +1513,16 @@ class BassiWebClient {
 
                 // Hide loading status - agent is ready
                 this.hideServerStatus()
+
+                // Process any files that were queued while waiting for session ID
+                if (this.pendingFiles.length > 0) {
+                    console.log(`🔄 Processing ${this.pendingFiles.length} queued file(s)...`)
+                    const filesToProcess = [...this.pendingFiles]
+                    this.pendingFiles = []
+                    for (const file of filesToProcess) {
+                        await this.processDroppedFile(file)
+                    }
+                }
                 break
 
             case 'user_message_echo':

@@ -11,26 +11,42 @@ Key differences from V2 web_server.py:
 """
 
 import asyncio
-import logging
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
+import logging
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from bassi.logging_utils import configure_logging
 from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig
 from bassi.core_v3.interactive_questions import InteractiveQuestionService
 from bassi.core_v3.message_converter import convert_message_to_websocket
+from bassi.core_v3.session_index import SessionIndex
+from bassi.core_v3.session_workspace import SessionWorkspace
 from bassi.core_v3.tools import create_bassi_tools
+from bassi.core_v3.upload_service import (
+    FileTooLargeError,
+    InvalidFilenameError,
+    UploadService,
+)
 
-# Configure logging at module level for uvicorn subprocess
-# (logging config from cli.py doesn't get inherited by subprocess)
-logging.basicConfig(
+# Ensure logging exists for uvicorn subprocesses without clobbering existing handlers
+configure_logging(
     level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    force=True,  # Override any existing config
+    log_file=None,
+    include_console=True,
 )
 logger = logging.getLogger(__name__)
 
@@ -71,6 +87,12 @@ class WebUIServerV3:
         self.active_sessions: dict[str, BassiAgentSession] = {}
         # connection_id -> InteractiveQuestionService
         self.question_services: dict[str, InteractiveQuestionService] = {}
+
+        # Session workspace infrastructure
+        self.upload_service = UploadService()
+        self.session_index = SessionIndex(base_path=Path("chats"))
+        # session_id -> SessionWorkspace (active workspaces)
+        self.workspaces: dict[str, SessionWorkspace] = {}
 
         self._setup_routes()
 
@@ -251,83 +273,114 @@ class WebUIServerV3:
                 )
                 return JSONResponse({"error": str(e)}, status_code=500)
 
-        # File upload endpoint
+        # File upload endpoint (session-aware)
         @self.app.post("/api/upload")
-        async def upload_file(file: UploadFile = File(...)):
+        async def upload_file(
+            session_id: str = Form(...),
+            file: UploadFile = File(...),
+        ):
             """
-            Upload a file (image, PDF, or document) to _DATA_FROM_USER/.
+            Upload a file to session-specific workspace.
 
             Args:
+                session_id: Session ID for workspace isolation
                 file: Uploaded file from multipart/form-data
 
             Returns:
                 JSON with file metadata: path, size, media_type, filename
             """
             try:
-                import time
-
-                # Validate file
-                if not file.filename:
+                # Get workspace for this session
+                workspace = self.workspaces.get(session_id)
+                if not workspace:
                     return JSONResponse(
-                        {"error": "No filename provided"},
-                        status_code=400
+                        {"error": f"Session not found: {session_id}"},
+                        status_code=404,
                     )
 
-                # Get file info
-                content = await file.read()
-                file_size = len(content)
-                media_type = file.content_type or "application/octet-stream"
-
-                # Validate size limits based on type
-                if media_type.startswith("image/"):
-                    max_size = 5 * 1024 * 1024  # 5MB for images
-                elif media_type == "application/pdf":
-                    max_size = 32 * 1024 * 1024  # 32MB for PDFs
-                else:
-                    max_size = 100 * 1024 * 1024  # 100MB for documents
-
-                if file_size > max_size:
-                    return JSONResponse(
-                        {
-                            "error": f"File too large. Maximum size is {max_size / (1024 * 1024):.0f}MB for {media_type}"
-                        },
-                        status_code=413
-                    )
-
-                # Create _DATA_FROM_USER directory
-                data_dir = Path.cwd() / "_DATA_FROM_USER"
-                data_dir.mkdir(exist_ok=True)
-
-                # Generate unique filename (add timestamp to prevent overwrites)
-                timestamp = int(time.time())
-                filename_parts = file.filename.rsplit(".", 1)
-                if len(filename_parts) == 2:
-                    unique_filename = f"{filename_parts[0]}_{timestamp}.{filename_parts[1]}"
-                else:
-                    unique_filename = f"{file.filename}_{timestamp}"
-
-                # Save file
-                save_path = data_dir / unique_filename
-                save_path.write_bytes(content)
-
-                logger.info(
-                    f"📁 Uploaded file: {save_path} ({file_size} bytes, {media_type})"
+                # Upload file using UploadService
+                file_path = await self.upload_service.upload_to_session(
+                    file, workspace
                 )
 
-                # Return file metadata
-                return JSONResponse({
-                    "path": str(save_path),
-                    "filename": unique_filename,
-                    "original_filename": file.filename,
-                    "size": file_size,
-                    "media_type": media_type,
-                })
+                # Get file info
+                file_info = self.upload_service.get_upload_info(
+                    file_path, workspace
+                )
+
+                logger.info(
+                    f"📁 Uploaded to session {session_id[:8]}: "
+                    f"{file.filename} -> {file_info['path']}"
+                )
+
+                return JSONResponse(file_info)
+
+            except FileTooLargeError as e:
+                logger.warning(f"File too large: {file.filename} - {e}")
+                return JSONResponse(
+                    {"error": str(e)},
+                    status_code=413,
+                )
+
+            except InvalidFilenameError as e:
+                logger.warning(f"Invalid filename: {e}")
+                return JSONResponse(
+                    {"error": str(e)},
+                    status_code=400,
+                )
 
             except Exception as e:
                 logger.error(f"File upload failed: {e}", exc_info=True)
                 return JSONResponse(
                     {"error": f"Upload failed: {str(e)}"},
-                    status_code=500
+                    status_code=500,
+                )
+
+        # Session files listing endpoint
+        @self.app.get("/api/sessions/{session_id}/files")
+        async def list_session_files(session_id: str):
+            """
+            List all uploaded files for a session.
+
+            Args:
+                session_id: Session ID to list files for
+
+            Returns:
+                JSON with list of files and their metadata
+            """
+            try:
+                # Get workspace for this session
+                workspace = self.workspaces.get(session_id)
+                if not workspace:
+                    return JSONResponse(
+                        {"error": f"Session not found: {session_id}"},
+                        status_code=404,
+                    )
+
+                # Get DATA_FROM_USER directory
+                data_dir = workspace.physical_path / "DATA_FROM_USER"
+                if not data_dir.exists():
+                    return JSONResponse({"files": []})
+
+                # List all files
+                files = []
+                for file_path in sorted(data_dir.iterdir()):
+                    if file_path.is_file():
+                        file_info = self.upload_service.get_upload_info(
+                            file_path, workspace
+                        )
+                        files.append(file_info)
+
+                return JSONResponse({"files": files})
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to list files for session {session_id}: {e}",
+                    exc_info=True,
+                )
+                return JSONResponse(
+                    {"error": f"Failed to list files: {str(e)}"},
+                    status_code=500,
                 )
 
         # WebSocket endpoint
@@ -337,27 +390,46 @@ class WebUIServerV3:
 
     async def _handle_websocket(self, websocket: WebSocket):
         """Handle WebSocket connection with isolated agent session"""
-        # Generate unique connection ID
+        # Generate unique connection ID (will be session_id)
         connection_id = str(uuid.uuid4())
-        logger.info(f"🔷 [WS] Generated connection ID: {connection_id[:8]}...")
+        logger.info(
+            f"🔷 [WS] Generated connection ID: {connection_id[:8]}..."
+        )
+
+        # Create or load session workspace
+        logger.info(
+            f"🔷 [WS] Creating session workspace for: {connection_id[:8]}..."
+        )
+        if SessionWorkspace.exists(connection_id):
+            workspace = SessionWorkspace.load(connection_id)
+            logger.info(
+                f"✅ Loaded existing workspace: {connection_id[:8]}..."
+            )
+        else:
+            workspace = SessionWorkspace(connection_id, create=True)
+            workspace.update_display_name(f"Session {connection_id[:8]}")
+            self.session_index.add_session(workspace)
+            logger.info(f"✅ Created new workspace: {connection_id[:8]}...")
+
+        self.workspaces[connection_id] = workspace
 
         # Create interactive question service for this session
-        logger.info(f"🔷 [WS] Creating InteractiveQuestionService...")
+        logger.info("🔷 [WS] Creating InteractiveQuestionService...")
         question_service = InteractiveQuestionService()
         question_service.websocket = websocket
         self.question_services[connection_id] = question_service
-        logger.info(f"🔷 [WS] InteractiveQuestionService created")
+        logger.info("🔷 [WS] InteractiveQuestionService created")
 
         # Create dedicated agent session with question service
-        logger.info(f"🔷 [WS] Creating agent session via factory...")
+        logger.info("🔷 [WS] Creating agent session via factory...")
         session = self.session_factory(question_service)
         self.active_sessions[connection_id] = session
         logger.info(f"🔷 [WS] Agent session created: {type(session)}")
 
-        logger.info(f"🔷 [WS] Accepting WebSocket connection...")
+        logger.info("🔷 [WS] Accepting WebSocket connection...")
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"🔷 [WS] WebSocket accepted")
+        logger.info("🔷 [WS] WebSocket accepted")
 
         logger.info(
             f"New session: {connection_id[:8]}... | Total connections: {len(self.active_connections)}"
@@ -373,9 +445,9 @@ class WebUIServerV3:
             )
 
             # Connect agent session
-            logger.info(f"🔷 [WS] Calling session.connect()...")
+            logger.info("🔷 [WS] Calling session.connect()...")
             await session.connect()
-            logger.info(f"🔷 [WS] session.connect() completed")
+            logger.info("🔷 [WS] session.connect() completed")
 
             # Send status update after connecting
             await websocket.send_json(
@@ -386,14 +458,14 @@ class WebUIServerV3:
             )
 
             # Send connected event to trigger welcome box
-            logger.info(f"🔷 [WS] Sending 'connected' event to client...")
+            logger.info("🔷 [WS] Sending 'connected' event to client...")
             await websocket.send_json(
                 {
                     "type": "connected",
                     "session_id": connection_id,
                 }
             )
-            logger.info(f"🔷 [WS] 'connected' event sent successfully")
+            logger.info("🔷 [WS] 'connected' event sent successfully")
 
             # NOTE: Capabilities are now fetched via REST endpoint /api/capabilities
             # (removed confusing empty query startup hack)
@@ -469,14 +541,18 @@ class WebUIServerV3:
             # Support both string (backward compatible) and array (multimodal)
             if isinstance(content, str):
                 # Text-only message (backward compatible)
-                content_blocks = [{"type": "text", "text": content}] if content else []
+                content_blocks = (
+                    [{"type": "text", "text": content}] if content else []
+                )
                 echo_content = content
             elif isinstance(content, list):
                 # Multimodal content blocks
                 content_blocks = content
                 # Extract text for echo (for UI display)
                 text_blocks = [b for b in content if b.get("type") == "text"]
-                echo_content = text_blocks[0].get("text", "") if text_blocks else ""
+                echo_content = (
+                    text_blocks[0].get("text", "") if text_blocks else ""
+                )
             else:
                 logger.error(f"Invalid content type: {type(content)}")
                 return
@@ -901,7 +977,7 @@ class WebUIServerV3:
                             # 'init' subtype = metadata (tools, MCP servers, etc.) - SKIP
                             if subtype == "init":
                                 logger.debug(
-                                    f"⏩ Skipping 'init' system message (metadata only)"
+                                    "⏩ Skipping 'init' system message (metadata only)"
                                 )
                                 continue  # Skip metadata messages
 
@@ -931,17 +1007,26 @@ class WebUIServerV3:
                                     )
 
                                     # Extract all data except type/subtype
-                                    data_fields = {k: v for k, v in event.items() if k not in ["type", "subtype"]}
+                                    data_fields = {
+                                        k: v
+                                        for k, v in event.items()
+                                        if k not in ["type", "subtype"]
+                                    }
 
                                     if data_fields:
                                         # Format the data as a readable message
                                         import json
+
                                         formatted_content = f"**{subtype.replace('_', ' ').title()}**\n\n"
                                         formatted_content += "```json\n"
-                                        formatted_content += json.dumps(data_fields, indent=2)
+                                        formatted_content += json.dumps(
+                                            data_fields, indent=2
+                                        )
                                         formatted_content += "\n```"
                                         event["content"] = formatted_content
-                                        logger.info(f"✅ Formatted system message with data: {list(data_fields.keys())}")
+                                        logger.info(
+                                            f"✅ Formatted system message with data: {list(data_fields.keys())}"
+                                        )
                                     else:
                                         # No data at all - skip this message
                                         logger.debug(
@@ -1011,7 +1096,7 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                 # Stream response from agent (same pattern as user_message)
                 async for message in session.query(
                     prompt=formatted_hint,
-                    session_id=data.get("session_id", "default")
+                    session_id=data.get("session_id", "default"),
                 ):
                     # Convert SDK message to WebSocket events (returns list)
                     events = convert_message_to_websocket(message)
@@ -1032,8 +1117,12 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
                         elif event_type == "tool_start":
                             # Create tool block ID
-                            tool_use_id = event.get("id")  # Agent SDK's tool_use_id
-                            display_id = f"msg-{message_counter}-tool-{tool_counter}"
+                            tool_use_id = event.get(
+                                "id"
+                            )  # Agent SDK's tool_use_id
+                            display_id = (
+                                f"msg-{message_counter}-tool-{tool_counter}"
+                            )
                             tool_counter += 1
                             tool_id_map[tool_use_id] = display_id
                             event["id"] = display_id
@@ -1052,7 +1141,9 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                             display_id = tool_id_map.get(tool_use_id)
                             if display_id:
                                 event["id"] = display_id
-                                logger.info(f"✅ Mapped to display_id: {display_id}")
+                                logger.info(
+                                    f"✅ Mapped to display_id: {display_id}"
+                                )
                             else:
                                 logger.warning(
                                     f"❌ No display ID for tool_use_id: {tool_use_id}"
@@ -1070,7 +1161,7 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                             # Skip 'init' system messages
                             if subtype == "init":
                                 logger.debug(
-                                    f"⏩ Skipping 'init' system message (metadata only)"
+                                    "⏩ Skipping 'init' system message (metadata only)"
                                 )
                                 continue
 
@@ -1099,17 +1190,26 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                                     )
 
                                     # Extract all data except type/subtype
-                                    data_fields = {k: v for k, v in event.items() if k not in ["type", "subtype"]}
+                                    data_fields = {
+                                        k: v
+                                        for k, v in event.items()
+                                        if k not in ["type", "subtype"]
+                                    }
 
                                     if data_fields:
                                         # Format the data as a readable message
                                         import json
+
                                         formatted_content = f"**{subtype.replace('_', ' ').title()}**\n\n"
                                         formatted_content += "```json\n"
-                                        formatted_content += json.dumps(data_fields, indent=2)
+                                        formatted_content += json.dumps(
+                                            data_fields, indent=2
+                                        )
                                         formatted_content += "\n```"
                                         event["content"] = formatted_content
-                                        logger.info(f"✅ Formatted system message with data: {list(data_fields.keys())}")
+                                        logger.info(
+                                            f"✅ Formatted system message with data: {list(data_fields.keys())}"
+                                        )
                                     else:
                                         # No data at all - skip this message
                                         logger.debug(
@@ -1190,7 +1290,9 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
             source = block.get("source", {})
             if source.get("type") != "base64":
-                logger.warning(f"Unsupported image source type: {source.get('type')}")
+                logger.warning(
+                    f"Unsupported image source type: {source.get('type')}"
+                )
                 continue
 
             base64_data = source.get("data", "")
@@ -1229,8 +1331,6 @@ Now continue with the interrupted task/plan/intention. Go on..."""
         Args:
             reload: Enable hot reload for development
         """
-        import subprocess
-        import sys
 
         import uvicorn
 
@@ -1254,23 +1354,36 @@ Now continue with the interrupted task/plan/intention. Go on..."""
             # Can't use uvicorn.Config programmatically because it requires
             # module path string for reload to work properly
             reload_dir = str(Path(__file__).parent.parent)
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "uvicorn",
-                    "bassi.core_v3.web_server_v3:get_app",
-                    "--factory",
-                    "--host",
-                    self.host,
-                    "--port",
-                    str(self.port),
-                    "--reload",
-                    "--reload-dir",
-                    reload_dir,
-                ],
-                check=True,
-            )
+            try:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "uvicorn",
+                        "bassi.core_v3.web_server_v3:get_app",
+                        "--factory",
+                        "--host",
+                        self.host,
+                        "--port",
+                        str(self.port),
+                        "--reload",
+                        "--reload-dir",
+                        reload_dir,
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error(f"❌ Failed to start web server: {e}")
+                logger.error("")
+                logger.error(
+                    f"💡 Port {self.port} may already be in use. Try:"
+                )
+                logger.error("   • pkill -9 -f bassi-web")
+                logger.error(
+                    f"   • lsof -i :{self.port}  (to see what's using the port)"
+                )
+                logger.error("")
+                raise
         else:
             config = uvicorn.Config(
                 app=self.app,

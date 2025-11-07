@@ -1,0 +1,58 @@
+{
+  "mcpServers": {
+    "linkedin-mcp": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/stickerdaniel/linkedin-mcp-server",
+        "linkedin-mcp-server",
+        "--cookie",
+        "${LINKEDIN_COOKIE}"
+      ],
+      "env": {
+        "CHROMEDRIVER_PATH": "/Users/benno/bin/chromedriver"
+      }
+    },
+    "ms365": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server"
+      ],
+      "env": {
+        "MS365_MCP_CLIENT_ID": "${MS365_CLIENT_ID}",
+        "MS365_MCP_CLIENT_SECRET": "${MS365_CLIENT_SECRET}",
+        "MS365_MCP_TENANT_ID": "${MS365_TENANT_ID}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    },
+    "postgresql": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@executeautomation/database-server",
+        "--postgresql",
+        "--host",
+        "localhost",
+        "--database",
+        "crm_data_bassi",
+        "--user",
+        "postgres",
+        "--password",
+        "somethingsecure"
+      ]
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp",
+      "headers": {
+        "Authorization": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}

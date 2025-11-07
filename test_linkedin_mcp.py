@@ -11,21 +11,27 @@ def test_linkedin():
     """Test LinkedIn MCP connection and profile fetching"""
 
     # Check if LINKEDIN_COOKIE is set
-    cookie = os.environ.get('LINKEDIN_COOKIE')
+    cookie = os.environ.get("LINKEDIN_COOKIE")
     if not cookie:
         print("❌ LINKEDIN_COOKIE not set!")
         return False
 
     print(f"✅ LINKEDIN_COOKIE found (length: {len(cookie)})")
-    print(f"   Has li_at prefix: {'Yes' if cookie.startswith('li_at=') else 'No'}")
+    print(
+        f"   Has li_at prefix: {'Yes' if cookie.startswith('li_at=') else 'No'}"
+    )
     print(f"   First 20 chars: {cookie[:20]}...")
     print()
 
     # Start Docker container
     docker_cmd = [
-        "docker", "run", "--rm", "-i",
-        "-e", "LINKEDIN_COOKIE",
-        "stickerdaniel/linkedin-mcp-server:latest"
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "LINKEDIN_COOKIE",
+        "stickerdaniel/linkedin-mcp-server:latest",
     ]
 
     print("🚀 Starting LinkedIn MCP server...")
@@ -36,7 +42,7 @@ def test_linkedin():
         stderr=subprocess.PIPE,
         env=os.environ.copy(),
         text=True,
-        bufsize=1
+        bufsize=1,
     )
 
     try:
@@ -48,8 +54,8 @@ def test_linkedin():
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "test-client", "version": "1.0"}
-            }
+                "clientInfo": {"name": "test-client", "version": "1.0"},
+            },
         }
 
         print("📤 Sending initialize request...")
@@ -60,7 +66,10 @@ def test_linkedin():
         response_line = proc.stdout.readline()
         if response_line:
             response = json.loads(response_line)
-            print("✅ Initialized:", response.get("result", {}).get("serverInfo", {}))
+            print(
+                "✅ Initialized:",
+                response.get("result", {}).get("serverInfo", {}),
+            )
         else:
             print("❌ No response from server")
             return False
@@ -68,17 +77,13 @@ def test_linkedin():
         # Send initialized notification
         initialized = {
             "jsonrpc": "2.0",
-            "method": "notifications/initialized"
+            "method": "notifications/initialized",
         }
         proc.stdin.write(json.dumps(initialized) + "\n")
         proc.stdin.flush()
 
         # List tools
-        list_tools = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list"
-        }
+        list_tools = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
 
         print("\n📤 Requesting tools list...")
         proc.stdin.write(json.dumps(list_tools) + "\n")
@@ -104,8 +109,8 @@ def test_linkedin():
                 "name": "get_person_profile",
                 "arguments": {
                     "linkedin_username": "benno-loeffler-stuttgart"
-                }
-            }
+                },
+            },
         }
 
         print("\n📤 Fetching profile for 'benno-loeffler-stuttgart'...")
@@ -120,7 +125,7 @@ def test_linkedin():
                 print(json.dumps(response["result"], indent=2))
             else:
                 error = response.get("error", {})
-                print(f"❌ Profile fetch failed:")
+                print("❌ Profile fetch failed:")
                 print(f"   Code: {error.get('code')}")
                 print(f"   Message: {error.get('message')}")
                 print(f"   Data: {error.get('data')}")

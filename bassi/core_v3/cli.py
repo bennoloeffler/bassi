@@ -7,23 +7,21 @@ For CLI usage, use the main 'bassi' command instead.
 """
 
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+import logging
 from bassi.core_v3 import display_startup_discovery, start_web_server_v3
+from bassi.logging_utils import configure_logging
 
 # Load environment variables from .env file
 env_path = Path.cwd() / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Setup logging with DEBUG level for intensive debugging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# Setup logging with DEBUG level for intensive debugging (console)
+configure_logging(level=logging.DEBUG, include_console=True)
 
 logger = logging.getLogger(__name__)
 
