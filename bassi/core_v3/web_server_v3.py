@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -250,6 +250,85 @@ class WebUIServerV3:
                     f"Error fetching capabilities: {e}", exc_info=True
                 )
                 return JSONResponse({"error": str(e)}, status_code=500)
+
+        # File upload endpoint
+        @self.app.post("/api/upload")
+        async def upload_file(file: UploadFile = File(...)):
+            """
+            Upload a file (image, PDF, or document) to _DATA_FROM_USER/.
+
+            Args:
+                file: Uploaded file from multipart/form-data
+
+            Returns:
+                JSON with file metadata: path, size, media_type, filename
+            """
+            try:
+                import time
+
+                # Validate file
+                if not file.filename:
+                    return JSONResponse(
+                        {"error": "No filename provided"},
+                        status_code=400
+                    )
+
+                # Get file info
+                content = await file.read()
+                file_size = len(content)
+                media_type = file.content_type or "application/octet-stream"
+
+                # Validate size limits based on type
+                if media_type.startswith("image/"):
+                    max_size = 5 * 1024 * 1024  # 5MB for images
+                elif media_type == "application/pdf":
+                    max_size = 32 * 1024 * 1024  # 32MB for PDFs
+                else:
+                    max_size = 100 * 1024 * 1024  # 100MB for documents
+
+                if file_size > max_size:
+                    return JSONResponse(
+                        {
+                            "error": f"File too large. Maximum size is {max_size / (1024 * 1024):.0f}MB for {media_type}"
+                        },
+                        status_code=413
+                    )
+
+                # Create _DATA_FROM_USER directory
+                data_dir = Path.cwd() / "_DATA_FROM_USER"
+                data_dir.mkdir(exist_ok=True)
+
+                # Generate unique filename (add timestamp to prevent overwrites)
+                timestamp = int(time.time())
+                filename_parts = file.filename.rsplit(".", 1)
+                if len(filename_parts) == 2:
+                    unique_filename = f"{filename_parts[0]}_{timestamp}.{filename_parts[1]}"
+                else:
+                    unique_filename = f"{file.filename}_{timestamp}"
+
+                # Save file
+                save_path = data_dir / unique_filename
+                save_path.write_bytes(content)
+
+                logger.info(
+                    f"📁 Uploaded file: {save_path} ({file_size} bytes, {media_type})"
+                )
+
+                # Return file metadata
+                return JSONResponse({
+                    "path": str(save_path),
+                    "filename": unique_filename,
+                    "original_filename": file.filename,
+                    "size": file_size,
+                    "media_type": media_type,
+                })
+
+            except Exception as e:
+                logger.error(f"File upload failed: {e}", exc_info=True)
+                return JSONResponse(
+                    {"error": f"Upload failed: {str(e)}"},
+                    status_code=500
+                )
 
         # WebSocket endpoint
         @self.app.websocket("/ws")
@@ -838,17 +917,37 @@ class WebUIServerV3:
                                 )
                                 logger.info(f"📦 Compaction event: {subtype}")
 
-                            # Other subtypes: Only show if they have displayable content
+                            # Other subtypes: Check if they have displayable content
                             else:
                                 has_content = any(
                                     key in event and event[key]
                                     for key in ["content", "message", "text"]
                                 )
                                 if not has_content:
-                                    logger.debug(
-                                        f"⏩ Skipping system message without content: subtype={subtype}"
+                                    # No standard content fields - try to format the data
+                                    # This handles system commands like /cost, /todos, /context, etc.
+                                    logger.info(
+                                        f"📋 System message without standard content field: subtype={subtype}, event keys={list(event.keys())}"
                                     )
-                                    continue  # Skip non-displayable messages
+
+                                    # Extract all data except type/subtype
+                                    data_fields = {k: v for k, v in event.items() if k not in ["type", "subtype"]}
+
+                                    if data_fields:
+                                        # Format the data as a readable message
+                                        import json
+                                        formatted_content = f"**{subtype.replace('_', ' ').title()}**\n\n"
+                                        formatted_content += "```json\n"
+                                        formatted_content += json.dumps(data_fields, indent=2)
+                                        formatted_content += "\n```"
+                                        event["content"] = formatted_content
+                                        logger.info(f"✅ Formatted system message with data: {list(data_fields.keys())}")
+                                    else:
+                                        # No data at all - skip this message
+                                        logger.debug(
+                                            f"⏩ Skipping system message with no displayable data: subtype={subtype}"
+                                        )
+                                        continue
 
                         # Send event to client
                         await websocket.send_json(event)
@@ -986,17 +1085,37 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                                 )
                                 logger.info(f"📦 Compaction event: {subtype}")
 
-                            # Skip system messages without content
+                            # Other subtypes: Check if they have displayable content
                             else:
                                 has_content = any(
                                     key in event and event[key]
                                     for key in ["content", "message", "text"]
                                 )
                                 if not has_content:
-                                    logger.debug(
-                                        f"⏩ Skipping system message without content: subtype={subtype}"
+                                    # No standard content fields - try to format the data
+                                    # This handles system commands like /cost, /todos, /context, etc.
+                                    logger.info(
+                                        f"📋 System message without standard content field: subtype={subtype}, event keys={list(event.keys())}"
                                     )
-                                    continue
+
+                                    # Extract all data except type/subtype
+                                    data_fields = {k: v for k, v in event.items() if k not in ["type", "subtype"]}
+
+                                    if data_fields:
+                                        # Format the data as a readable message
+                                        import json
+                                        formatted_content = f"**{subtype.replace('_', ' ').title()}**\n\n"
+                                        formatted_content += "```json\n"
+                                        formatted_content += json.dumps(data_fields, indent=2)
+                                        formatted_content += "\n```"
+                                        event["content"] = formatted_content
+                                        logger.info(f"✅ Formatted system message with data: {list(data_fields.keys())}")
+                                    else:
+                                        # No data at all - skip this message
+                                        logger.debug(
+                                            f"⏩ Skipping system message with no displayable data: subtype={subtype}"
+                                        )
+                                        continue
 
                         # Send event to client
                         await websocket.send_json(event)

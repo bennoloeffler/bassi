@@ -43,8 +43,10 @@ class BassiWebClient {
         this.markdownRenderer = null
         this.renderDebounceTimers = new Map()  // id -> timer
 
-        // Image handling
-        this.pendingImages = []                  // Images to send with next message
+        // File handling
+        this.pendingImages = []                  // Images to send with next message (legacy, kept for compatibility)
+        this.pendingFiles = []                   // All files to send (images, PDFs, documents)
+        this.dragCounter = 0                     // Track drag enter/leave events
 
         // DOM elements
         this.conversationEl = document.getElementById('conversation')
@@ -103,6 +105,9 @@ class BassiWebClient {
         this.messageInput.addEventListener('paste', (e) => {
             this.handlePaste(e)
         })
+
+        // Handle drag & drop for files
+        this.setupDragAndDrop()
 
         if (this.verboseLevelSelect) {
             this.verboseLevelSelect.value = this.verboseLevel
@@ -607,7 +612,7 @@ class BassiWebClient {
             })
         }
 
-        // Add images if present
+        // Add images if present (legacy pendingImages for backward compatibility)
         for (const img of this.pendingImages) {
             contentBlocks.push({
                 type: 'image',
@@ -620,7 +625,40 @@ class BassiWebClient {
             })
         }
 
-        // Must have at least text or image
+        // Add files (PDFs and documents) from pendingFiles
+        for (const file of this.pendingFiles) {
+            if (file.type === 'image') {
+                // Image from drag & drop
+                contentBlocks.push({
+                    type: 'image',
+                    source: {
+                        type: 'base64',
+                        media_type: file.media_type,
+                        data: file.data
+                    },
+                    filename: file.filename
+                })
+            } else if (file.type === 'pdf') {
+                // PDF as document block
+                contentBlocks.push({
+                    type: 'document',
+                    source: {
+                        type: 'base64',
+                        media_type: 'application/pdf',
+                        data: file.data
+                    },
+                    filename: file.filename
+                })
+            } else if (file.type === 'document') {
+                // Document as text reference (Claude will use Read tool)
+                contentBlocks.push({
+                    type: 'text',
+                    text: `[Attached file: ${file.filename} (${(file.size / 1024).toFixed(1)} KB) - saved to ${file.saved_path}]`
+                })
+            }
+        }
+
+        // Must have at least text, image, or file
         if (contentBlocks.length === 0) {
             return
         }
@@ -656,11 +694,13 @@ class BassiWebClient {
 
         console.log(`📤 Sent ${messageType}:`, contentBlocks.length === 1 ? 'text-only' : `${contentBlocks.length} blocks`)
 
-        // Clear input, images, and reset height
+        // Clear input, images, files, and reset height
         this.messageInput.value = ''
         this.messageInput.style.height = 'auto'
         this.pendingImages = []
+        this.pendingFiles = []
         this.renderImagePreviews()
+        this.renderFilePreviews()
 
         // If this was a regular message, set agent working
         if (messageType === 'user_message') {
@@ -806,6 +846,297 @@ class BassiWebClient {
         this.pendingImages.splice(index, 1)
         this.renderImagePreviews()
         console.log(`🗑️ Image removed (${this.pendingImages.length} remaining)`)
+    }
+
+    // === Drag & Drop Handlers ===
+
+    setupDragAndDrop() {
+        const dropZone = document.body
+
+        dropZone.addEventListener('dragenter', (e) => this.handleDragEnter(e))
+        dropZone.addEventListener('dragover', (e) => this.handleDragOver(e))
+        dropZone.addEventListener('dragleave', (e) => this.handleDragLeave(e))
+        dropZone.addEventListener('drop', (e) => this.handleDrop(e))
+    }
+
+    handleDragEnter(e) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        this.dragCounter++
+
+        if (this.dragCounter === 1) {
+            // Show drop overlay
+            this.showDropOverlay()
+        }
+    }
+
+    handleDragOver(e) {
+        e.preventDefault()
+        e.stopPropagation()
+    }
+
+    handleDragLeave(e) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        this.dragCounter--
+
+        if (this.dragCounter === 0) {
+            // Hide drop overlay
+            this.hideDropOverlay()
+        }
+    }
+
+    async handleDrop(e) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        this.dragCounter = 0
+        this.hideDropOverlay()
+
+        const files = e.dataTransfer?.files
+        if (!files || files.length === 0) return
+
+        console.log(`📁 ${files.length} file(s) dropped`)
+
+        // Process each file
+        for (const file of files) {
+            await this.processDroppedFile(file)
+        }
+    }
+
+    showDropOverlay() {
+        let overlay = document.getElementById('drop-overlay')
+        if (!overlay) {
+            overlay = document.createElement('div')
+            overlay.id = 'drop-overlay'
+            overlay.className = 'drop-overlay'
+            overlay.innerHTML = `
+                <div class="drop-overlay-content">
+                    <div class="drop-overlay-icon">📁</div>
+                    <div class="drop-overlay-text">Drop files here</div>
+                    <div class="drop-overlay-hint">Images, PDFs, and Documents</div>
+                </div>
+            `
+            document.body.appendChild(overlay)
+        }
+        overlay.style.display = 'flex'
+    }
+
+    hideDropOverlay() {
+        const overlay = document.getElementById('drop-overlay')
+        if (overlay) {
+            overlay.style.display = 'none'
+        }
+    }
+
+    async processDroppedFile(file) {
+        console.log(`📄 Processing: ${file.name} (${file.type}, ${(file.size / 1024).toFixed(1)} KB)`)
+
+        const fileType = this.getFileType(file)
+
+        if (fileType === 'image') {
+            // Handle images (small, base64 inline)
+            this.addImageToMessage(file)
+        } else if (fileType === 'pdf') {
+            // Handle PDFs (upload to server, then base64 encode)
+            await this.addPDFToMessage(file)
+        } else if (fileType === 'document') {
+            // Handle other documents (upload to server, file reference)
+            await this.addDocumentToMessage(file)
+        } else {
+            alert(`Unsupported file type: ${file.type || 'unknown'}`)
+        }
+    }
+
+    getFileType(file) {
+        const type = file.type.toLowerCase()
+        const name = file.name.toLowerCase()
+
+        // Images
+        if (type.startsWith('image/')) {
+            if (['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'].includes(type)) {
+                return 'image'
+            }
+        }
+
+        // PDFs
+        if (type === 'application/pdf' || name.endsWith('.pdf')) {
+            return 'pdf'
+        }
+
+        // Documents
+        const docExtensions = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.md']
+        if (docExtensions.some(ext => name.endsWith(ext))) {
+            return 'document'
+        }
+
+        return 'unknown'
+    }
+
+    async addPDFToMessage(file) {
+        // Validate size (32MB limit for PDFs)
+        if (file.size > 32 * 1024 * 1024) {
+            alert('PDF too large. Maximum size is 32MB.')
+            return
+        }
+
+        // Upload to server first
+        const uploadResult = await this.uploadFile(file)
+        if (!uploadResult) return
+
+        // Convert to base64 for sending to Claude
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            const dataUrl = e.target.result
+            const [header, base64Data] = dataUrl.split(',')
+
+            const fileData = {
+                type: 'pdf',
+                data: base64Data,
+                media_type: 'application/pdf',
+                size: file.size,
+                filename: file.name,
+                saved_path: uploadResult.path
+            }
+
+            this.pendingFiles.push(fileData)
+            console.log(`📄 PDF added: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
+
+            // Show preview
+            this.renderFilePreviews()
+        }
+        reader.onerror = (error) => {
+            console.error('Failed to read PDF file:', error)
+            alert('Failed to read PDF file. Please try again.')
+        }
+        reader.readAsDataURL(file)
+    }
+
+    async addDocumentToMessage(file) {
+        // Validate size (100MB limit for documents)
+        if (file.size > 100 * 1024 * 1024) {
+            alert('Document too large. Maximum size is 100MB.')
+            return
+        }
+
+        // Upload to server
+        const uploadResult = await this.uploadFile(file)
+        if (!uploadResult) return
+
+        const fileData = {
+            type: 'document',
+            filename: file.name,
+            media_type: file.type,
+            size: file.size,
+            saved_path: uploadResult.path
+        }
+
+        this.pendingFiles.push(fileData)
+        console.log(`📎 Document added: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
+
+        // Show preview
+        this.renderFilePreviews()
+    }
+
+    async uploadFile(file) {
+        try {
+            const formData = new FormData()
+            formData.append('file', file)
+
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+
+            if (!response.ok) {
+                throw new Error(`Upload failed: ${response.statusText}`)
+            }
+
+            const result = await response.json()
+            console.log(`✅ File uploaded: ${result.path}`)
+            return result
+
+        } catch (error) {
+            console.error('File upload failed:', error)
+            alert(`Failed to upload file: ${error.message}`)
+            return null
+        }
+    }
+
+    renderFilePreviews() {
+        // Combine images and files for unified preview
+        // For now, keep using the existing renderImagePreviews for images
+        // and add a new preview area for other files
+
+        // Get or create file preview container
+        let previewContainer = document.getElementById('file-preview-container')
+        if (!previewContainer) {
+            const inputContainer = document.querySelector('.input-container')
+            const inputWrapper = document.querySelector('.input-wrapper')
+
+            previewContainer = document.createElement('div')
+            previewContainer.id = 'file-preview-container'
+            previewContainer.className = 'file-preview-container'
+
+            const previewsDiv = document.createElement('div')
+            previewsDiv.className = 'file-previews'
+            previewContainer.appendChild(previewsDiv)
+
+            inputContainer.insertBefore(previewContainer, inputWrapper)
+        }
+
+        const previewsDiv = previewContainer.querySelector('.file-previews')
+        previewsDiv.innerHTML = ''
+
+        if (this.pendingFiles.length === 0) {
+            previewContainer.style.display = 'none'
+            return
+        }
+
+        previewContainer.style.display = 'block'
+
+        // Render each file preview
+        this.pendingFiles.forEach((file, index) => {
+            const previewEl = document.createElement('div')
+            previewEl.className = 'file-preview'
+
+            // Get icon based on type
+            let icon = '📄'
+            if (file.type === 'pdf') icon = '📕'
+            else if (file.type === 'document') {
+                if (file.filename.endsWith('.docx') || file.filename.endsWith('.doc')) icon = '📘'
+                else if (file.filename.endsWith('.xlsx') || file.filename.endsWith('.xls')) icon = '📗'
+                else if (file.filename.endsWith('.pptx') || file.filename.endsWith('.ppt')) icon = '📙'
+                else if (file.filename.endsWith('.txt')) icon = '📝'
+            }
+
+            previewEl.innerHTML = `
+                <div class="file-preview-icon">${icon}</div>
+                <div class="file-preview-info">
+                    <div class="file-preview-name">${file.filename}</div>
+                    <div class="file-preview-size">${(file.size / 1024).toFixed(1)} KB</div>
+                </div>
+            `
+
+            const removeBtn = document.createElement('button')
+            removeBtn.className = 'file-preview-remove'
+            removeBtn.textContent = '×'
+            removeBtn.title = 'Remove file'
+            removeBtn.onclick = () => {
+                this.removeFile(index)
+            }
+
+            previewEl.appendChild(removeBtn)
+            previewsDiv.appendChild(previewEl)
+        })
+    }
+
+    removeFile(index) {
+        this.pendingFiles.splice(index, 1)
+        this.renderFilePreviews()
+        console.log(`🗑️ File removed (${this.pendingFiles.length} remaining)`)
     }
 
     setAgentWorking(working) {
