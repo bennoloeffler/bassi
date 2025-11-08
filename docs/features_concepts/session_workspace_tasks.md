@@ -1,9 +1,33 @@
 # Session Workspace - Task Breakdown
 
-**Status**: Ready for Implementation
-**Version**: 1.0
-**Date**: 2025-11-07
+**Status**: Partially Implemented (Backend Complete, Frontend Pending)
+**Version**: 1.1
+**Date**: 2025-11-08 (Updated)
 **Total Estimated Time**: 10-12 days
+
+## Implementation Status (2025-11-08)
+
+### ✅ Implemented (Backend)
+- `SessionWorkspace` class with file upload, deduplication, metadata
+- `SessionIndex` for session tracking
+- `/api/upload` endpoint for file uploads
+- `/api/sessions/{id}/files` endpoint for listing files
+- Streaming file upload (O(1) memory usage)
+- Hash-based deduplication
+
+### ❌ Not Implemented (Frontend)
+- File browser UI in `bassi/static/`
+- Session selector/switcher UI
+- LocalStorage session persistence
+- Drag-and-drop visual feedback beyond current staging
+
+### 📋 Current Behavior
+Users can upload files via the current UI, but there's no way to:
+- Browse previously uploaded files in a session
+- Switch between sessions
+- See session file history
+
+**Decision Point**: This spec describes the FULL vision. To implement the frontend file browser, follow tasks in Phase 2-3. To continue with current "ephemeral staging" model, no action needed.
 
 ---
 
@@ -125,11 +149,13 @@
 #### Task 1.6: Create File List Endpoint [1h]
 **File**: `bassi/core_v3/web_server_v3.py` (extend)
 
-- [ ] Create `@app.get("/api/sessions/{session_id}/files")` endpoint
-- [ ] Get workspace from session_id
-- [ ] Call `workspace.list_files()`
-- [ ] Return file list as JSON
-- [ ] Add error handling (session not found)
+- [x] Create `@app.get("/api/sessions/{session_id}/files")` endpoint ✅ IMPLEMENTED
+- [x] Get workspace from session_id
+- [x] Call `workspace.list_files()`
+- [x] Return file list as JSON
+- [x] Add error handling (session not found)
+- **Implementation**: `bassi/core_v3/web_server_v3.py:335-377`
+- **Status**: Backend complete, frontend UI not yet implemented
 
 **Dependencies**: Task 1.4
 **Deliverable**: Working file list endpoint
