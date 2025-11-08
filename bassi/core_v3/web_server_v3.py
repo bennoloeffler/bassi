@@ -1228,6 +1228,32 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                     }
                 )
 
+        elif msg_type == "config_change":
+            # User changed configuration (e.g., thinking mode toggle)
+            thinking_mode = data.get("thinking_mode")
+            logger.info(f"⚙️ Config change received: thinking_mode={thinking_mode}")
+
+            if thinking_mode is not None:
+                try:
+                    await session.update_thinking_mode(thinking_mode)
+                    await websocket.send_json(
+                        {
+                            "type": "config_updated",
+                            "thinking_mode": thinking_mode,
+                        }
+                    )
+                    logger.info(f"✅ Thinking mode updated to: {thinking_mode}")
+                except Exception as e:
+                    logger.error(
+                        f"❌ Error updating thinking mode: {e}", exc_info=True
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": f"Failed to update thinking mode: {str(e)}",
+                        }
+                    )
+
         elif msg_type == "get_server_info":
             # User requested server info (commands, MCP tools, agents, etc.)
             logger.info("Server info request received")

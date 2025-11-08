@@ -224,6 +224,15 @@ class BassiWebClient {
                     document.body.classList.add('hide-thinking')
                     console.log('❌ Thinking blocks disabled')
                 }
+
+                // Send config change to backend
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'config_change',
+                        thinking_mode: showThinking
+                    }))
+                    console.log(`🔄 Sent thinking mode update to backend: ${showThinking}`)
+                }
             })
         }
     }

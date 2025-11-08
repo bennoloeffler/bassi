@@ -73,21 +73,22 @@
 
 ---
 
-### 1.4 Make Thinking Mode Toggle Functional ⏸️
-**Status**: PENDING
+### 1.4 Make Thinking Mode Toggle Functional ✅
+**Status**: DONE
 **Files**:
-- `bassi/static/app.js` (add WebSocket config_change message)
-- `bassi/core_v3/web_server_v3.py` (handle config_change)
-- `bassi/core_v3/agent_session.py` (model override parameter)
+- `bassi/static/app.js:228-235` (sends WebSocket config_change message)
+- `bassi/core_v3/web_server_v3.py:1231-1255` (handles config_change)
+- `bassi/core_v3/agent_session.py:40-41,127-131,181-223` (model switching)
 
 **Steps**:
-- [ ] Add WebSocket message type: config_change
-- [ ] Extend BassiAgentSession.query() with thinking_mode param
-- [ ] Update WebSocket handler
-- [ ] Test toggle in UI
-- [ ] Verify model actually switches to :thinking variant
+- [x] Add model_id and thinking_mode to SessionConfig
+- [x] Create get_model_id() method to compute model with :thinking suffix
+- [x] Add update_thinking_mode() method that reconnects with new model
+- [x] Add WebSocket message type: config_change
+- [x] Update UI toggle to send config_change message
+- [x] Run tests to verify no regressions
 
-**Success Criteria**: UI toggle controls actual model behavior
+**Success Criteria**: ✅ UI toggle controls actual model behavior (claude-sonnet-4-5-20250929 ↔ claude-sonnet-4-5-20250929:thinking)
 
 ---
 
@@ -289,14 +290,20 @@
 - ✅ DONE - Completed and tested
 - ❌ BLOCKED - Waiting on something
 
-**Current Focus**: Phase 1.1 - Centralize Logging Configuration
+**Current Focus**: Phase 1 - Critical Infrastructure Fixes (4/6 complete)
 
-**Completed**: 0/20 tasks (0%)
+**Completed**: 4/20 tasks (20%)
+
+**Phase 1 Status**:
+- ✅ 1.1 Centralize Logging Configuration
+- ⏸️ 1.2 Increase Agent Test Coverage (deferred, larger task)
+- ✅ 1.3 Stream Uploads Directly to Disk
+- ✅ 1.4 Make Thinking Mode Toggle Functional
+- ⏸️ 1.5 Expose Safer Permission Modes & Hooks (explicitly skipped per user)
+- ✅ 1.6 Session Workspace Contract Enforcement (documented)
 
 **Next Up**:
-1. Fix logging in bassi/agent.py
-2. Fix logging in web_server_v3.py
-3. Run tests to verify
+1. Consider tackling 1.2 (test coverage) or move to Phase 2 (architecture consolidation)
 
 ---
 

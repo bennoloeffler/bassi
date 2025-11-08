@@ -36,6 +36,10 @@ class SessionConfig:
         None  # "default", "acceptEdits", "plan", "bypassPermissions"
     )
 
+    # Model configuration
+    model_id: str = "claude-sonnet-4-5-20250929"
+    thinking_mode: bool = False  # Use :thinking model variant
+
     # MCP servers
     mcp_servers: dict[str, Any] = field(default_factory=dict)
 
@@ -100,6 +104,7 @@ class BassiAgentSession:
 
         # Convert our config to Agent SDK options
         self.sdk_options = ClaudeAgentOptions(
+            model=self.get_model_id(),  # Use :thinking suffix if enabled
             allowed_tools=self.config.allowed_tools,
             system_prompt=self.config.system_prompt,
             permission_mode=self.config.permission_mode,
@@ -118,6 +123,12 @@ class BassiAgentSession:
         self._connected = False
         self.message_history: list[Message] = []
         self.stats = SessionStats(session_id=self.session_id)
+
+    def get_model_id(self) -> str:
+        """Get the effective model ID based on thinking mode."""
+        if self.config.thinking_mode:
+            return f"{self.config.model_id}:thinking"
+        return self.config.model_id
 
     async def __aenter__(self):
         """Context manager entry"""
@@ -166,6 +177,50 @@ class BassiAgentSession:
 
         await self.client.disconnect()
         self._connected = False
+
+    async def update_thinking_mode(self, thinking_mode: bool):
+        """
+        Update thinking mode and reconnect with new model.
+
+        Args:
+            thinking_mode: Enable/disable thinking mode
+
+        Note:
+            This will disconnect and reconnect the session with the new model.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(
+            f"🔄 [SESSION] Updating thinking mode: {self.config.thinking_mode} → {thinking_mode}"
+        )
+
+        # Update config
+        self.config.thinking_mode = thinking_mode
+
+        # Recreate SDK options with new model
+        self.sdk_options = ClaudeAgentOptions(
+            model=self.get_model_id(),  # Will use :thinking suffix if enabled
+            allowed_tools=self.config.allowed_tools,
+            system_prompt=self.config.system_prompt,
+            permission_mode=self.config.permission_mode,
+            mcp_servers=self.config.mcp_servers,
+            cwd=self.config.cwd,
+            can_use_tool=self.config.can_use_tool,
+            hooks=self.config.hooks,
+            setting_sources=self.config.setting_sources,
+            max_thinking_tokens=10000,
+        )
+
+        # If already connected, reconnect with new client
+        if self._connected:
+            logger.info("🔄 [SESSION] Reconnecting with new model...")
+            await self.disconnect()
+            await self.connect()
+            logger.info(
+                f"✅ [SESSION] Reconnected with model: {self.get_model_id()}"
+            )
 
     async def _create_multimodal_message(
         self, content_blocks: list[dict], session_id: str
