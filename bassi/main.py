@@ -647,6 +647,14 @@ async def main_async() -> None:
 
 def main() -> None:
     """Entry point - runs async main"""
+    # Configure logging once for CLI mode
+    from bassi.logging_utils import configure_logging
+    configure_logging()
+
+    # Enable DEBUG logging via environment variable
+    if os.getenv("BASSI_DEBUG"):
+        logging.getLogger().setLevel(logging.DEBUG)
+
     try:
         anyio.run(main_async)
     except KeyboardInterrupt:

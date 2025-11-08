@@ -42,12 +42,7 @@ from bassi.core_v3.upload_service import (
     UploadService,
 )
 
-# Ensure logging exists for uvicorn subprocesses without clobbering existing handlers
-configure_logging(
-    level=logging.DEBUG,
-    log_file=None,
-    include_console=True,
-)
+# Logging configured by entry point (cli.py)
 logger = logging.getLogger(__name__)
 
 

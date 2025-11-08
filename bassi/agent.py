@@ -32,14 +32,8 @@ from bassi.mcp_servers.task_automation_server import (
     create_task_automation_server,
 )
 
-# Setup logging once for CLI usage
-configure_logging()
+# Logging configured by entry point (main.py or cli.py)
 logger = logging.getLogger(__name__)
-
-# Enable DEBUG logging via environment variable
-if os.getenv("BASSI_DEBUG"):
-    logger.setLevel(logging.DEBUG)
-    logging.getLogger().setLevel(logging.DEBUG)
 
 
 # Event system for web UI

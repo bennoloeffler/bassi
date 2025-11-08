@@ -75,7 +75,8 @@ def test_agent_has_mcp_servers():
     # Check SDK MCP servers are registered
     assert "bash" in agent.sdk_mcp_servers
     assert "web" in agent.sdk_mcp_servers
-    assert len(agent.sdk_mcp_servers) == 2
+    assert "task_automation" in agent.sdk_mcp_servers
+    assert len(agent.sdk_mcp_servers) == 3
 
     # Check options are configured
     assert agent.options is not None
