@@ -214,11 +214,16 @@ class SessionWorkspace:
                 new_symlink_name = f"{symlink_name}-{counter}"
                 new_symlink_path = self.SYMLINK_DIR / new_symlink_name
 
-                if not new_symlink_path.exists():
+                try:
+                    # Try to create symlink with counter suffix
                     os.symlink(target, new_symlink_path)
                     self.metadata["symlink_name"] = new_symlink_name
                     self._save_metadata()
                     break
+                except FileExistsError:
+                    # Race condition: symlink created between iterations
+                    # Continue to next counter
+                    pass
 
                 counter += 1
                 if counter > 100:
@@ -234,8 +239,13 @@ class SessionWorkspace:
         if symlink_name:
             symlink_path = self.SYMLINK_DIR / symlink_name
 
-            if symlink_path.is_symlink():
+            try:
+                # Try to remove symlink (will raise if not exists)
                 symlink_path.unlink()
+            except FileNotFoundError:
+                # Race condition: symlink already removed by another process
+                # or never existed - both cases are fine
+                pass
 
     def delete(self) -> None:
         """

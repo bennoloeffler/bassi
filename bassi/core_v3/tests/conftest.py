@@ -6,11 +6,20 @@ import asyncio
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 import httpx
 import pytest
 import uvicorn
 
+from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig
+from bassi.core_v3.interactive_questions import InteractiveQuestionService
+from bassi.core_v3.session_workspace import SessionWorkspace
+from bassi.core_v3.tools import create_bassi_tools
+from bassi.core_v3.web_server_v3 import WebUIServerV3
+from bassi.shared.agent_protocol import AgentClientFactory
+from bassi.shared.mcp_registry import create_mcp_registry
+from bassi.shared.sdk_loader import create_sdk_mcp_server
 from tests.fixtures.mock_agent_client import MockAgentClient
 
 
@@ -20,19 +29,65 @@ def mock_agent_client() -> MockAgentClient:
     return MockAgentClient()
 
 
+def create_mock_session_factory():
+    """
+    Create session factory using MockAgentClient for E2E tests.
+
+    This factory creates BassiAgentSession instances that use the mock client
+    instead of the real Claude API, allowing tests to run without API keys
+    and without making real API calls.
+    """
+
+    def mock_client_factory(config: SessionConfig):
+        """Factory that creates MockAgentClient instances"""
+        return MockAgentClient()
+
+    def factory(
+        question_service: InteractiveQuestionService,
+        workspace: SessionWorkspace,
+    ):
+        # Create Bassi interactive tools (including AskUserQuestion)
+        bassi_tools = create_bassi_tools(question_service)
+        bassi_mcp_server = create_sdk_mcp_server(
+            name="bassi-interactive", version="1.0.0", tools=bassi_tools
+        )
+
+        # Create MCP registry (minimal for tests)
+        mcp_servers = {
+            "bassi-interactive": bassi_mcp_server,
+        }
+
+        # Generate workspace context
+        workspace_context = workspace.get_workspace_context()
+
+        config = SessionConfig(
+            allowed_tools=["*"],
+            system_prompt=workspace_context,
+            permission_mode="bypassPermissions",
+            mcp_servers=mcp_servers,
+            setting_sources=["project", "local"],
+        )
+
+        # Create session with mock client factory
+        return BassiAgentSession(config, client_factory=mock_client_factory)
+
+    return factory
+
+
 @pytest.fixture(scope="session")
 @pytest.mark.xdist_group(name="e2e_server")
 def live_server():
     """
     Start web server on localhost:8765 for E2E tests.
 
+    Uses mock agent client to avoid real API calls.
     Uses xdist_group to ensure all E2E tests run in same worker (avoids multiple servers).
     Server runs for entire test session and is shared by all E2E tests.
     """
-    from bassi.core_v3.web_server_v3 import get_app
-
-    # Get the FastAPI app instance
-    app = get_app()
+    # Create server with mock session factory
+    session_factory = create_mock_session_factory()
+    server_instance = WebUIServerV3(session_factory, "localhost", 8765)
+    app = server_instance.app
 
     # Configure uvicorn to run in background thread
     config = uvicorn.Config(
