@@ -129,22 +129,30 @@ class SessionWorkspace:
                     f"(max {self.MAX_FILE_SIZE / 1024 / 1024:.1f} MB)"
                 )
 
-            # Calculate hash while reading
+            # Stream to temporary file while hashing (bounded memory)
             hasher = hashlib.sha256()
-            content_chunks = []
+            temp_dir = self.physical_path / "DATA_FROM_USER"
+            temp_file_path = temp_dir / f".tmp_{file.filename}"
 
-            while True:
-                chunk = await file.read(self.CHUNK_SIZE)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-                content_chunks.append(chunk)
+            # Ensure directory exists
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write and hash in one pass
+            with open(temp_file_path, "wb") as f:
+                while True:
+                    chunk = await file.read(self.CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+                    f.write(chunk)
 
             file_hash = hasher.hexdigest()[:16]  # Use first 16 chars
 
             # Check for duplicate by hash
             existing_file = self._find_file_by_hash(file_hash)
             if existing_file:
+                # Remove temp file and return existing
+                temp_file_path.unlink()
                 return existing_file
 
             # Generate unique filename
@@ -153,10 +161,8 @@ class SessionWorkspace:
             )
             file_path = self.physical_path / "DATA_FROM_USER" / filename
 
-            # Write file
-            with open(file_path, "wb") as f:
-                for chunk in content_chunks:
-                    f.write(chunk)
+            # Rename temp file to final location
+            temp_file_path.rename(file_path)
 
             # Update metadata
             self.metadata["file_count"] = (
