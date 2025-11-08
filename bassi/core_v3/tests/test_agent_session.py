@@ -18,6 +18,8 @@ from bassi.core_v3.agent_session import (
     SessionConfig,
     SessionStats,
 )
+from bassi.shared.sdk_loader import SDK_AVAILABLE
+from bassi.shared.sdk_types import AssistantMessage, ResultMessage, TextBlock
 
 
 class TestSessionConfig:
@@ -87,8 +89,7 @@ class TestBassiAgentSession:
         session = BassiAgentSession(config)
 
         assert session.config == config
-        assert session.sdk_options.allowed_tools == ["Bash"]
-        assert session.sdk_options.system_prompt == "Test prompt"
+        assert session.get_model_id() == config.model_id
 
     def test_session_id_unique(self):
         """Test that each session gets a unique ID"""
@@ -127,8 +128,70 @@ class TestBassiAgentSession:
         assert history1 is not history2  # Different objects
         assert history1 == history2  # But same content
 
+    @pytest.mark.asyncio
+    async def test_query_streams_messages(self, mock_agent_client):
+        """Test query uses injected client to stream messages."""
 
-# Integration tests (require Claude Code to be installed)
+        mock_agent_client.queue_response(
+            AssistantMessage(
+                content=[TextBlock(text="hi")], model="test-model"
+            ),
+            ResultMessage(
+                subtype="complete",
+                duration_ms=100,
+                duration_api_ms=80,
+                is_error=False,
+                num_turns=1,
+                session_id="test-session",
+                usage={"input_tokens": 1, "output_tokens": 2},
+                total_cost_usd=0.001,
+            ),
+        )
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        results = []
+        async for message in session.query("Hello world"):
+            results.append(message)
+
+        assert len(results) == 2
+        assert session.stats.message_count == 1
+        assert mock_agent_client.sent_prompts[0]["prompt"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_interrupt_delegates_to_client(self, mock_agent_client):
+        """Test interrupt() calls client interrupt when connected."""
+
+        mock_agent_client.queue_response()
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        await session.connect()
+        await session.interrupt()
+        assert mock_agent_client.interrupted is True
+
+    @pytest.mark.asyncio
+    async def test_context_manager_uses_mock_client(self, mock_agent_client):
+        """Test async context manager lifecycle with mock client."""
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        async with session as active_session:
+            assert active_session._connected is True
+            assert mock_agent_client.connected is True
+
+        assert session._connected is False
+        assert mock_agent_client.connected is False
+
+
+@pytest.mark.skipif(
+    not SDK_AVAILABLE, reason="claude_agent_sdk not installed"
+)
 class TestBassiAgentSessionIntegration:
     """Integration tests that require actual Claude Code connection"""
 

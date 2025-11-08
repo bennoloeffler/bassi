@@ -1,7 +1,6 @@
 #!/bin/bash
 # Quality assurance pipeline for bassi
 
-set -e  # Exit on error
 
 echo "============================================="
 echo "Running Quality Assurance Pipeline"

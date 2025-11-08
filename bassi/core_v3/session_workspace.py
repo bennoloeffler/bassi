@@ -6,11 +6,14 @@ session workspace architecture.
 
 Physical path: chats/{session_id}/
 Display name: Stored in metadata (mutable)
+Symlink: chats-human-readable/{timestamp}__{name}__{short-id} -> ../chats/{session_id}
 """
 
 import asyncio
 import hashlib
 import json
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -42,6 +45,9 @@ class SessionWorkspace:
         "DATA_FROM_AGENT",
     ]
 
+    # Symlink directory for human-readable session names
+    SYMLINK_DIR = Path("chats-human-readable")
+
     def __init__(
         self,
         session_id: str,
@@ -65,6 +71,10 @@ class SessionWorkspace:
             self._create_directory_structure()
 
         self.metadata = self._load_or_create_metadata()
+
+        # Create initial symlink for new sessions
+        if create and not self.metadata.get("symlink_name"):
+            self._create_initial_symlink()
 
     def _create_directory_structure(self) -> None:
         """Create workspace directory structure."""
@@ -103,6 +113,144 @@ class SessionWorkspace:
         metadata_path = self.physical_path / "session.json"
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+    def _sanitize_name(self, name: str) -> str:
+        """
+        Clean name for filesystem use (kebab-case).
+
+        Converts to lowercase, replaces spaces/underscores with hyphens,
+        removes non-alphanumeric chars (except hyphens), collapses multiple
+        hyphens, and truncates to 50 chars.
+
+        Args:
+            name: Original name
+
+        Returns:
+            Sanitized kebab-case name
+        """
+        # Lowercase and replace spaces/underscores with hyphens
+        name = name.lower().replace(" ", "-").replace("_", "-")
+
+        # Remove non-alphanumeric except hyphens
+        name = re.sub(r"[^a-z0-9-]", "", name)
+
+        # Collapse multiple hyphens
+        name = re.sub(r"-+", "-", name)
+
+        # Strip leading/trailing hyphens
+        name = name.strip("-")
+
+        # Truncate to 50 chars
+        return name[:50]
+
+    def _create_initial_symlink(self) -> None:
+        """
+        Create initial symlink with timestamp and placeholder name.
+
+        Format: {iso-datetime}__new-session__{short-id}
+        Example: 2025-11-08T14-30-45__new-session__a1b2c3d4
+        """
+        # Ensure symlink directory exists
+        self.SYMLINK_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Generate symlink name
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        short_id = self.session_id[:8]
+        symlink_name = f"{timestamp}__new-session__{short_id}"
+
+        # Create symlink
+        symlink_path = self.SYMLINK_DIR / symlink_name
+        target = Path("..") / "chats" / self.session_id
+
+        try:
+            os.symlink(target, symlink_path)
+            self.metadata["symlink_name"] = symlink_name
+            self._save_metadata()
+        except FileExistsError:
+            # Symlink already exists (race condition), just update metadata
+            self.metadata["symlink_name"] = symlink_name
+            self._save_metadata()
+
+    def update_symlink(self, new_name: str) -> None:
+        """
+        Update symlink with new LLM-generated or user-provided name.
+
+        Removes old symlink and creates new one with updated name.
+
+        Format: {iso-datetime}__{sanitized-name}__{short-id}
+        Example: 2025-11-08T14-30-45__implement-login-feature__a1b2c3d4
+
+        Args:
+            new_name: New human-readable name (will be sanitized)
+        """
+        # Remove old symlink if it exists
+        self._remove_symlink()
+
+        # Ensure symlink directory exists
+        self.SYMLINK_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Generate new symlink name
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        short_id = self.session_id[:8]
+        clean_name = self._sanitize_name(new_name)
+
+        if not clean_name:
+            clean_name = "unnamed-session"
+
+        symlink_name = f"{timestamp}__{clean_name}__{short_id}"
+
+        # Create new symlink
+        symlink_path = self.SYMLINK_DIR / symlink_name
+        target = Path("..") / "chats" / self.session_id
+
+        try:
+            os.symlink(target, symlink_path)
+            self.metadata["symlink_name"] = symlink_name
+            self._save_metadata()
+        except FileExistsError:
+            # Symlink already exists, append counter
+            counter = 1
+            while True:
+                new_symlink_name = f"{symlink_name}-{counter}"
+                new_symlink_path = self.SYMLINK_DIR / new_symlink_name
+
+                if not new_symlink_path.exists():
+                    os.symlink(target, new_symlink_path)
+                    self.metadata["symlink_name"] = new_symlink_name
+                    self._save_metadata()
+                    break
+
+                counter += 1
+                if counter > 100:
+                    # Safety limit
+                    raise ValueError(
+                        f"Could not create unique symlink for {symlink_name}"
+                    )
+
+    def _remove_symlink(self) -> None:
+        """Remove existing symlink if it exists."""
+        symlink_name = self.metadata.get("symlink_name")
+
+        if symlink_name:
+            symlink_path = self.SYMLINK_DIR / symlink_name
+
+            if symlink_path.is_symlink():
+                symlink_path.unlink()
+
+    def delete(self) -> None:
+        """
+        Delete workspace directory and symlink.
+
+        WARNING: This permanently deletes all session data.
+        """
+        import shutil
+
+        # Remove symlink first
+        self._remove_symlink()
+
+        # Remove physical directory
+        if self.physical_path.exists():
+            shutil.rmtree(self.physical_path)
 
     async def upload_file(self, file: UploadFile) -> Path:
         """
@@ -271,13 +419,16 @@ class SessionWorkspace:
 
     def update_display_name(self, new_name: str) -> None:
         """
-        Update session display name.
+        Update session display name and symlink.
 
         Args:
             new_name: New display name (mutable, doesn't affect physical path)
         """
         self.metadata["display_name"] = new_name
         self._save_metadata()
+
+        # Update symlink with new name
+        self.update_symlink(new_name)
 
     def update_state(self, new_state: str) -> None:
         """
@@ -349,3 +500,110 @@ class SessionWorkspace:
             workspace_path.exists()
             and (workspace_path / "session.json").exists()
         )
+
+    def get_workspace_context(self) -> str:
+        """
+        Generate workspace context string for agent awareness.
+
+        Returns a formatted string describing:
+        - Available workspace folders and their purposes
+        - Files currently in DATA_FROM_USER/
+        - Instructions for saving outputs to appropriate folders
+
+        Returns:
+            Formatted workspace context string
+        """
+        # Build context string
+        context_lines = [
+            "# Your Workspace",
+            "",
+            f"**Session:** {self.display_name}",
+            f"**Session ID:** {self.session_id}",
+            "",
+            "## Folder Structure",
+            "",
+            "Your workspace has the following folders:",
+            "",
+            "- **DATA_FROM_USER/** - Files uploaded by the user. Read-only.",
+            "- **RESULTS_FROM_AGENT/** - Save analysis results, reports, processed data here.",
+            "- **SCRIPTS_FROM_AGENT/** - Save reusable scripts, tools, utilities here.",
+            "- **DATA_FROM_AGENT/** - Save other data files (downloads, generated data) here.",
+            "",
+        ]
+
+        # List available files in DATA_FROM_USER
+        uploaded_files = self.list_files()
+
+        if uploaded_files:
+            context_lines.extend(
+                [
+                    "## Available Files",
+                    "",
+                    "The user has uploaded these files:",
+                    "",
+                ]
+            )
+
+            for file_info in uploaded_files:
+                file_size_kb = file_info["size"] / 1024
+                context_lines.append(
+                    f"- `{file_info['path']}` ({file_size_kb:.1f} KB)"
+                )
+
+            context_lines.extend(["", ""])
+        else:
+            context_lines.extend(
+                [
+                    "## Available Files",
+                    "",
+                    "No files have been uploaded yet.",
+                    "",
+                ]
+            )
+
+        # Add usage instructions
+        context_lines.extend(
+            [
+                "## File Path Instructions",
+                "",
+                "When working with files:",
+                "",
+                f"1. **Reading user files:** Use `chats/{self.session_id}/DATA_FROM_USER/filename`",
+                f"2. **Saving results:** Use `chats/{self.session_id}/RESULTS_FROM_AGENT/filename`",
+                f"3. **Saving scripts:** Use `chats/{self.session_id}/SCRIPTS_FROM_AGENT/filename`",
+                f"4. **Saving data:** Use `chats/{self.session_id}/DATA_FROM_AGENT/filename`",
+                "",
+                "**Always use these full paths when calling tools like file read/write.**",
+                "",
+            ]
+        )
+
+        return "\n".join(context_lines)
+
+    def get_output_path(self, category: str, filename: str) -> str:
+        """
+        Get full output path for a given category and filename.
+
+        Args:
+            category: One of 'results', 'scripts', 'data'
+            filename: Name of the file to save
+
+        Returns:
+            Full path string suitable for agent tool use
+
+        Raises:
+            ValueError: If category is invalid
+        """
+        category_map = {
+            "results": "RESULTS_FROM_AGENT",
+            "scripts": "SCRIPTS_FROM_AGENT",
+            "data": "DATA_FROM_AGENT",
+        }
+
+        if category not in category_map:
+            raise ValueError(
+                f"Invalid category: {category}. Must be one of: {list(category_map.keys())}"
+            )
+
+        subdir = category_map[category]
+        return str(self.physical_path / subdir / filename)

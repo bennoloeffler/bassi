@@ -11,13 +11,13 @@ Key differences from V2 web_server.py:
 """
 
 import asyncio
+import logging
 import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
-import logging
 from fastapi import (
     FastAPI,
     File,
@@ -29,11 +29,11 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bassi.logging_utils import configure_logging
 from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig
 from bassi.core_v3.interactive_questions import InteractiveQuestionService
 from bassi.core_v3.message_converter import convert_message_to_websocket
 from bassi.core_v3.session_index import SessionIndex
+from bassi.core_v3.session_naming import SessionNamingService
 from bassi.core_v3.session_workspace import SessionWorkspace
 from bassi.core_v3.tools import create_bassi_tools
 from bassi.core_v3.upload_service import (
@@ -41,6 +41,9 @@ from bassi.core_v3.upload_service import (
     InvalidFilenameError,
     UploadService,
 )
+from bassi.shared.mcp_registry import create_mcp_registry
+from bassi.shared.sdk_loader import create_sdk_mcp_server
+from bassi.shared.sdk_types import SystemMessage, ToolResultBlock, UserMessage
 
 # Logging configured by entry point (cli.py)
 logger = logging.getLogger(__name__)
@@ -57,7 +60,7 @@ class WebUIServerV3:
     def __init__(
         self,
         session_factory: Callable[
-            [InteractiveQuestionService], BassiAgentSession
+            [InteractiveQuestionService, SessionWorkspace], BassiAgentSession
         ],
         host: str = "localhost",
         port: int = 8765,
@@ -67,7 +70,7 @@ class WebUIServerV3:
 
         Args:
             session_factory: Factory function to create BassiAgentSession instances
-                           Takes InteractiveQuestionService as parameter
+                           Takes InteractiveQuestionService and SessionWorkspace as parameters
             host: Server hostname
             port: Server port
         """
@@ -86,6 +89,7 @@ class WebUIServerV3:
         # Session workspace infrastructure
         self.upload_service = UploadService()
         self.session_index = SessionIndex(base_path=Path("chats"))
+        self.naming_service = SessionNamingService()
         # session_id -> SessionWorkspace (active workspaces)
         self.workspaces: dict[str, SessionWorkspace] = {}
 
@@ -180,7 +184,12 @@ class WebUIServerV3:
                 agents = []
 
                 temp_service = InteractiveQuestionService()
-                temp_session = self.session_factory(temp_service)
+                temp_workspace = SessionWorkspace(
+                    "capabilities-discovery", create=True
+                )
+                temp_session = self.session_factory(
+                    temp_service, temp_workspace
+                )
                 try:
                     await temp_session.connect()
 
@@ -193,8 +202,6 @@ class WebUIServerV3:
                         "ready", session_id="capabilities-discovery"
                     ):
                         # Extract tool names from system message
-                        from claude_agent_sdk.types import SystemMessage
-
                         if isinstance(message, SystemMessage):
                             logger.info(
                                 f"✅ Found SystemMessage with subtype: {message.subtype}"
@@ -331,6 +338,109 @@ class WebUIServerV3:
                     status_code=500,
                 )
 
+        # Session management endpoints
+        @self.app.get("/api/sessions")
+        async def list_sessions(
+            limit: int = 100,
+            offset: int = 0,
+            sort_by: str = "last_activity",
+            order: str = "desc",
+        ):
+            """
+            List all sessions with pagination and sorting.
+
+            Args:
+                limit: Maximum number of sessions to return (default 100)
+                offset: Number of sessions to skip (default 0)
+                sort_by: Field to sort by (created_at, last_activity, display_name)
+                order: Sort order (asc, desc)
+
+            Returns:
+                JSON with sessions list and metadata
+            """
+            try:
+                # Get all sessions from index (without pagination at this level)
+                all_sessions = list(
+                    self.session_index.index["sessions"].values()
+                )
+
+                # Sort sessions
+                reverse = order == "desc"
+                if sort_by == "created_at":
+                    all_sessions.sort(
+                        key=lambda s: s.get("created_at", ""),
+                        reverse=reverse,
+                    )
+                elif sort_by == "last_activity":
+                    all_sessions.sort(
+                        key=lambda s: s.get("last_activity", ""),
+                        reverse=reverse,
+                    )
+                elif sort_by == "display_name":
+                    all_sessions.sort(
+                        key=lambda s: s.get("display_name", ""),
+                        reverse=reverse,
+                    )
+
+                # Apply pagination
+                total = len(all_sessions)
+                sessions = all_sessions[offset : offset + limit]
+
+                return JSONResponse(
+                    {
+                        "sessions": sessions,
+                        "total": total,
+                        "limit": limit,
+                        "offset": offset,
+                    }
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to list sessions: {e}", exc_info=True)
+                return JSONResponse(
+                    {"error": f"Failed to list sessions: {str(e)}"},
+                    status_code=500,
+                )
+
+        @self.app.get("/api/sessions/{session_id}")
+        async def get_session(session_id: str):
+            """
+            Get detailed information about a specific session.
+
+            Args:
+                session_id: Session ID to retrieve
+
+            Returns:
+                JSON with session details
+            """
+            try:
+                # Try to get workspace from active sessions
+                workspace = self.workspaces.get(session_id)
+
+                # If not active, try to load from disk
+                if not workspace:
+                    if not SessionWorkspace.exists(session_id):
+                        return JSONResponse(
+                            {"error": f"Session not found: {session_id}"},
+                            status_code=404,
+                        )
+                    workspace = SessionWorkspace.load(session_id)
+
+                # Get session stats
+                stats = workspace.get_stats()
+
+                return JSONResponse(stats)
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to get session {session_id}: {e}",
+                    exc_info=True,
+                )
+                return JSONResponse(
+                    {"error": f"Failed to get session: {str(e)}"},
+                    status_code=500,
+                )
+
         # Session files listing endpoint
         @self.app.get("/api/sessions/{session_id}/files")
         async def list_session_files(session_id: str):
@@ -380,25 +490,41 @@ class WebUIServerV3:
 
         # WebSocket endpoint
         @self.app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            await self._handle_websocket(websocket)
+        async def websocket_endpoint(
+            websocket: WebSocket, session_id: Optional[str] = None
+        ):
+            await self._handle_websocket(websocket, session_id)
 
-    async def _handle_websocket(self, websocket: WebSocket):
-        """Handle WebSocket connection with isolated agent session"""
-        # Generate unique connection ID (will be session_id)
-        connection_id = str(uuid.uuid4())
-        logger.info(
-            f"🔷 [WS] Generated connection ID: {connection_id[:8]}..."
-        )
+    async def _handle_websocket(
+        self, websocket: WebSocket, requested_session_id: Optional[str] = None
+    ):
+        """
+        Handle WebSocket connection with isolated agent session.
+
+        Args:
+            websocket: WebSocket connection
+            requested_session_id: Optional session ID to resume (from query param)
+        """
+        # Determine session ID: use provided if valid, otherwise create new
+        if requested_session_id and SessionWorkspace.exists(
+            requested_session_id
+        ):
+            connection_id = requested_session_id
+            is_resuming = True
+            logger.info(f"🔷 [WS] Resuming session: {connection_id[:8]}...")
+        else:
+            connection_id = str(uuid.uuid4())
+            is_resuming = False
+            logger.info(
+                f"🔷 [WS] Generated new connection ID: {connection_id[:8]}..."
+            )
 
         # Create or load session workspace
-        logger.info(
-            f"🔷 [WS] Creating session workspace for: {connection_id[:8]}..."
-        )
         if SessionWorkspace.exists(connection_id):
             workspace = SessionWorkspace.load(connection_id)
             logger.info(
-                f"✅ Loaded existing workspace: {connection_id[:8]}..."
+                f"✅ Loaded existing workspace: {connection_id[:8]}... "
+                f"(files: {workspace.metadata.get('file_count', 0)})"
             )
         else:
             workspace = SessionWorkspace(connection_id, create=True)
@@ -415,9 +541,9 @@ class WebUIServerV3:
         self.question_services[connection_id] = question_service
         logger.info("🔷 [WS] InteractiveQuestionService created")
 
-        # Create dedicated agent session with question service
+        # Create dedicated agent session with question service and workspace
         logger.info("🔷 [WS] Creating agent session via factory...")
-        session = self.session_factory(question_service)
+        session = self.session_factory(question_service, workspace)
         self.active_sessions[connection_id] = session
         logger.info(f"🔷 [WS] Agent session created: {type(session)}")
 
@@ -856,6 +982,12 @@ class WebUIServerV3:
             current_text_block_id = None
             tool_id_map = {}  # tool_use_id -> display_id
 
+            # Track content for auto-naming (after first exchange)
+            user_message_text = echo_content  # Captured from line 663
+            assistant_response_text = (
+                ""  # Will accumulate from text_delta events
+            )
+
             print("🔄 Starting query...", flush=True)
 
             try:
@@ -877,13 +1009,6 @@ class WebUIServerV3:
                                 f"   Content: {type(message.content).__name__}",
                                 flush=True,
                             )
-
-                    # Skip UserMessage ONLY if it's plain text (user's input echo)
-                    # BUT keep UserMessage with ToolResultBlock (tool results from SDK)
-                    from claude_agent_sdk.types import (
-                        ToolResultBlock,
-                        UserMessage,
-                    )
 
                     if isinstance(message, UserMessage):
                         # Check if this UserMessage contains ToolResultBlock
@@ -925,6 +1050,10 @@ class WebUIServerV3:
                                 current_text_block_id = f"msg-{message_counter}-text-{text_block_counter}"
                                 text_block_counter += 1
                             event["id"] = current_text_block_id
+
+                            # Accumulate assistant response for auto-naming
+                            delta_text = event.get("delta", "")
+                            assistant_response_text += delta_text
 
                         elif event_type == "tool_start":
                             # Create tool block ID
@@ -1035,6 +1164,53 @@ class WebUIServerV3:
                 # ✅ Send completion signal when query loop finishes
                 await websocket.send_json({"type": "message_complete"})
                 logger.info("✅ Query completed, sent message_complete")
+
+                # 🏷️  Auto-naming: Generate session name after first exchange
+                workspace = session.workspace
+                message_count = workspace.metadata.get("message_count", 0)
+                current_state = workspace.state
+
+                # Check if we should auto-name (first exchange completed)
+                if self.naming_service.should_auto_name(
+                    current_state, message_count
+                ):
+                    logger.info(
+                        f"🏷️  Auto-naming triggered (state={current_state}, messages={message_count})"
+                    )
+
+                    try:
+                        # Generate session name using LLM
+                        generated_name = (
+                            await self.naming_service.generate_session_name(
+                                user_message_text, assistant_response_text
+                            )
+                        )
+
+                        # Update workspace with new name
+                        workspace.update_display_name(generated_name)
+                        workspace.update_state("AUTO_NAMED")
+
+                        # Update session index
+                        await self._update_session_index(workspace)
+
+                        logger.info(
+                            f"✅ Session auto-named: {generated_name}"
+                        )
+
+                        # Notify frontend to refresh session list
+                        await websocket.send_json(
+                            {
+                                "type": "session_renamed",
+                                "session_id": workspace.session_id,
+                                "new_name": generated_name,
+                            }
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"❌ Auto-naming failed: {e}", exc_info=True
+                        )
+                        # Continue gracefully - naming is not critical
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
@@ -1231,7 +1407,9 @@ Now continue with the interrupted task/plan/intention. Go on..."""
         elif msg_type == "config_change":
             # User changed configuration (e.g., thinking mode toggle)
             thinking_mode = data.get("thinking_mode")
-            logger.info(f"⚙️ Config change received: thinking_mode={thinking_mode}")
+            logger.info(
+                f"⚙️ Config change received: thinking_mode={thinking_mode}"
+            )
 
             if thinking_mode is not None:
                 try:
@@ -1242,7 +1420,9 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                             "thinking_mode": thinking_mode,
                         }
                     )
-                    logger.info(f"✅ Thinking mode updated to: {thinking_mode}")
+                    logger.info(
+                        f"✅ Thinking mode updated to: {thinking_mode}"
+                    )
                 except Exception as e:
                     logger.error(
                         f"❌ Error updating thinking mode: {e}", exc_info=True
@@ -1417,55 +1597,47 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
 
 def create_default_session_factory() -> (
-    Callable[[InteractiveQuestionService], BassiAgentSession]
+    Callable[
+        [InteractiveQuestionService, SessionWorkspace], BassiAgentSession
+    ]
 ):
     """
     Create default session factory for web UI.
 
     Returns:
         Factory function that creates BassiAgentSession instances
-        with interactive question support
+        with interactive question support and workspace awareness
     """
 
-    def factory(question_service: InteractiveQuestionService):
-        # Load MCP servers from .mcp.json in project root
-        mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
-
-        # Always load as dict so we can add our interactive tools
-        import json
-
-        mcp_servers = {}
-
-        if mcp_config_path.exists():
-            logger.info(f"Loading MCP servers from: {mcp_config_path}")
-            try:
-                with open(mcp_config_path) as f:
-                    mcp_servers = json.load(f)
-                    # The .mcp.json might have mcpServers wrapper
-                    if "mcpServers" in mcp_servers:
-                        mcp_servers = mcp_servers["mcpServers"]
-            except Exception as e:
-                logger.error(f"Error loading MCP config: {e}")
-                mcp_servers = {}
-        else:
-            logger.warning(f"MCP config not found at: {mcp_config_path}")
-
-        # Create Bassi tools (including AskUserQuestion)
-        from claude_agent_sdk import create_sdk_mcp_server
-
+    def factory(
+        question_service: InteractiveQuestionService,
+        workspace: SessionWorkspace,
+    ):
+        # Create Bassi interactive tools (including AskUserQuestion)
         bassi_tools = create_bassi_tools(question_service)
         bassi_mcp_server = create_sdk_mcp_server(
             name="bassi-interactive", version="1.0.0", tools=bassi_tools
         )
 
-        # Add our interactive tools server to the dict
-        mcp_servers["bassi-interactive"] = bassi_mcp_server
+        # Create complete MCP registry:
+        # - SDK servers (bash, web, task_automation) from shared module
+        # - External servers from .mcp.json with env var substitution
+        # - Custom bassi-interactive server for questions
+        mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
+        mcp_servers = create_mcp_registry(
+            include_sdk=True,  # Include bash, web, task_automation
+            config_path=mcp_config_path,
+            custom_servers={"bassi-interactive": bassi_mcp_server},
+        )
+
+        # Generate workspace context for agent awareness
+        workspace_context = workspace.get_workspace_context()
 
         config = SessionConfig(
             allowed_tools=[
                 "*"
             ],  # Allow ALL tools including MCP, Skills, SlashCommands
-            system_prompt=None,  # Use default Claude Code prompt
+            system_prompt=workspace_context,  # Inject workspace awareness
             permission_mode="bypassPermissions",  # Bypass all permission checks
             mcp_servers=mcp_servers,
             setting_sources=[

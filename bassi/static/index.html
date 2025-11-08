@@ -48,6 +48,46 @@
         </div>
     </header>
 
+    <!-- Session Sidebar Toggle Button -->
+    <button id="session-sidebar-toggle" class="session-sidebar-toggle" title="Toggle sessions">
+        📚
+    </button>
+
+    <!-- Session Sidebar -->
+    <div id="session-sidebar" class="session-sidebar">
+        <div class="session-sidebar-header">
+            <h3 style="margin: 0 0 var(--spacing-md) 0; color: var(--text-primary); font-size: 1.1rem;">Sessions</h3>
+            <input
+                type="text"
+                id="session-search"
+                class="session-search"
+                placeholder="Search sessions..."
+                autocomplete="off"
+            >
+        </div>
+
+        <div id="session-list" class="session-list">
+            <div class="session-list-empty">
+                No sessions yet. Start chatting to create your first session!
+            </div>
+            <!-- Session groups will be added here dynamically:
+            <div class="session-group">
+                <div class="session-group-header">Today</div>
+                <div class="session-item active">
+                    <div class="session-item-name">Current Session</div>
+                    <div class="session-item-meta">2 messages • Just now</div>
+                </div>
+            </div>
+            -->
+        </div>
+
+        <div class="session-sidebar-footer">
+            <button id="new-session-button" class="new-session-button">
+                ➕ New Session
+            </button>
+        </div>
+    </div>
+
     <!-- Server Status Indicator -->
     <div id="server-status" class="server-status" style="display: none;">
         <div class="status-spinner"></div>
@@ -74,6 +114,18 @@
                 </div>
                 <div id="file-chips-grid" class="file-chips-grid">
                     <!-- File chips will appear here as small pills -->
+                </div>
+            </div>
+
+            <!-- Session Files List Area -->
+            <div id="file-list-area" class="file-list-area" style="display: none;">
+                <div class="file-list-header" onclick="window.bassiClient.toggleFileList()">
+                    <span class="file-list-count">📁 0 files in session</span>
+                    <span class="file-list-toggle-icon">▼</span>
+                </div>
+                <div id="file-list-content" class="file-list-content" style="display: none;">
+                    <div class="file-list-empty">No files uploaded yet</div>
+                    <!-- File list items will be added here -->
                 </div>
             </div>
 

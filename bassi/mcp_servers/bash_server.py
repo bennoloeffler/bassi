@@ -7,7 +7,7 @@ Provides bash command execution capability as an SDK MCP server
 import subprocess
 from typing import Any
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from bassi.shared.sdk_loader import create_sdk_mcp_server, tool
 
 
 @tool(

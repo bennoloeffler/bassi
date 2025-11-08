@@ -6,6 +6,12 @@ These tests verify the full integration with the agent.
 
 import pytest
 
+from bassi.shared.sdk_loader import SDK_AVAILABLE
+
+pytestmark = pytest.mark.skipif(
+    not SDK_AVAILABLE, reason="claude_agent_sdk not installed"
+)
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio

@@ -47,6 +47,7 @@ class BassiWebClient {
         // File handling
         this.stagedFiles = []                    // Files uploaded to server (shown as chips)
         this.pendingFiles = []                   // Files waiting for session ID
+        this.sessionFiles = []                   // All files in current session (from API)
         this.dragCounter = 0                     // Track drag enter/leave events
 
         // DOM elements
@@ -69,6 +70,23 @@ class BassiWebClient {
         this.fileChipsCount = document.querySelector('.file-chips-count')
         this.fileChipsToggle = document.querySelector('.file-chips-toggle')
         this.includeFilesToggle = document.getElementById('include-files-toggle')
+
+        // File list area elements
+        this.fileListArea = document.getElementById('file-list-area')
+        this.fileListCount = document.querySelector('.file-list-count')
+        this.fileListContent = document.getElementById('file-list-content')
+        this.fileListToggleIcon = document.querySelector('.file-list-toggle-icon')
+        this.fileListExpanded = false
+
+        // Session sidebar elements
+        this.sessionSidebar = document.getElementById('session-sidebar')
+        this.sessionSidebarToggle = document.getElementById('session-sidebar-toggle')
+        this.sessionList = document.getElementById('session-list')
+        this.sessionSearch = document.getElementById('session-search')
+        this.newSessionButton = document.getElementById('new-session-button')
+        this.sessionSidebarOpen = false
+        this.allSessions = []  // All sessions from API
+        this.filteredSessions = []  // Sessions after search filter
 
         this.init()
     }
@@ -147,6 +165,9 @@ class BassiWebClient {
         // Initialize autocomplete
         this.initAutocomplete()
 
+        // Initialize session sidebar
+        this.initSessionSidebar()
+
         // PHASE 1: Eager capability loading - load in parallel on startup
         this.loadCapabilities().then(() => {
             console.log('✅ Capabilities loaded on startup')
@@ -157,6 +178,136 @@ class BassiWebClient {
 
         // Connect WebSocket
         this.connect()
+    }
+
+    // ========== Session File Management ==========
+
+    async loadSessionFiles() {
+        /**
+         * Load all files for the current session from the API.
+         */
+        if (!this.sessionId) {
+            console.log('⚠️ Cannot load session files: no session ID')
+            return
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${this.sessionId}/files`)
+
+            if (!response.ok) {
+                console.error('❌ Failed to load session files:', response.status)
+                return
+            }
+
+            const data = await response.json()
+            this.sessionFiles = data.files || []
+
+            console.log('📁 Session files loaded:', this.sessionFiles.length)
+
+            // Update file chips with session files
+            this.updateFileChipsFromSessionFiles()
+        } catch (error) {
+            console.error('❌ Error loading session files:', error)
+        }
+    }
+
+    updateFileChipsFromSessionFiles() {
+        /**
+         * Update file chips display to show session files.
+         * Merges session files with currently staged files.
+         */
+        if (!this.sessionFiles || this.sessionFiles.length === 0) {
+            return
+        }
+
+        // Convert session files to staged files format
+        const sessionStagedFiles = this.sessionFiles.map(file => ({
+            name: file.name,
+            size: file.size,
+            uploadedPath: file.path,
+            isSessionFile: true  // Mark as already persisted
+        }))
+
+        // Merge with currently staged files (avoid duplicates by name)
+        const existingNames = new Set(this.stagedFiles.map(f => f.name))
+        for (const sessionFile of sessionStagedFiles) {
+            if (!existingNames.has(sessionFile.name)) {
+                this.stagedFiles.push(sessionFile)
+            }
+        }
+
+        // Update UI
+        this.updateFileChipsDisplay()
+        this.renderFileList()
+    }
+
+    toggleFileList() {
+        /**
+         * Toggle file list area between expanded and collapsed.
+         */
+        this.fileListExpanded = !this.fileListExpanded
+
+        if (this.fileListExpanded) {
+            this.fileListContent.style.display = 'block'
+            this.fileListToggleIcon.textContent = '▲'
+        } else {
+            this.fileListContent.style.display = 'none'
+            this.fileListToggleIcon.textContent = '▼'
+        }
+    }
+
+    renderFileList() {
+        /**
+         * Render the complete session file list.
+         */
+        const fileCount = this.sessionFiles.length
+
+        // Update count display
+        this.fileListCount.textContent = `📁 ${fileCount} file${fileCount !== 1 ? 's' : ''} in session`
+
+        // Show/hide file list area
+        if (fileCount > 0) {
+            this.fileListArea.style.display = 'block'
+        } else {
+            this.fileListArea.style.display = 'none'
+            return
+        }
+
+        // Render file list items
+        if (fileCount === 0) {
+            this.fileListContent.innerHTML = '<div class="file-list-empty">No files uploaded yet</div>'
+            return
+        }
+
+        const fileItems = this.sessionFiles.map(file => {
+            const fileSize = this.formatFileSize(file.size)
+            const uploadDate = new Date(file.uploaded_at).toLocaleString()
+
+            return `
+                <div class="file-list-item">
+                    <div class="file-list-item-icon">📄</div>
+                    <div class="file-list-item-info">
+                        <div class="file-list-item-name">${this.escapeHtml(file.name)}</div>
+                        <div class="file-list-item-meta">
+                            ${fileSize} • Uploaded ${uploadDate}
+                        </div>
+                    </div>
+                </div>
+            `
+        }).join('')
+
+        this.fileListContent.innerHTML = fileItems
+    }
+
+    formatFileSize(bytes) {
+        /**
+         * Format file size in human-readable format.
+         */
+        if (bytes === 0) return '0 B'
+        const k = 1024
+        const sizes = ['B', 'KB', 'MB', 'GB']
+        const i = Math.floor(Math.log(bytes) / Math.log(k))
+        return Math.round(bytes / Math.pow(k, i) * 10) / 10 + ' ' + sizes[i]
     }
 
     // ========== Settings ==========
@@ -485,7 +636,13 @@ class BassiWebClient {
 
     connect() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const wsUrl = `${protocol}//${window.location.host}/ws`
+        let wsUrl = `${protocol}//${window.location.host}/ws`
+
+        // Append session_id query parameter if resuming session
+        if (this.sessionId) {
+            wsUrl += `?session_id=${encodeURIComponent(this.sessionId)}`
+            console.log(`🔄 Resuming session: ${this.sessionId}`)
+        }
 
         console.log('🔌 Connecting to WebSocket:', wsUrl)
         this.updateConnectionStatus('connecting')
@@ -990,6 +1147,9 @@ class BassiWebClient {
 
             const result = await response.json()
             console.log(`✅ File uploaded: ${result.path}`)
+
+            // Reload session files to update the file list
+            await this.loadSessionFiles()
 
             return result
 
@@ -1514,6 +1674,9 @@ class BassiWebClient {
                 this.sessionId = msg.session_id
                 console.log('✅ [FRONTEND] Session ID stored:', this.sessionId)
 
+                // Load any existing session files (for resumed sessions)
+                this.loadSessionFiles()
+
                 // Clear any old messages from previous session
                 this.conversationEl.innerHTML = ''
                 console.log('🔷 [FRONTEND] Calling showWelcomeMessage()...')
@@ -1591,6 +1754,16 @@ class BassiWebClient {
 
             case 'question':
                 this.handleQuestion(msg)
+                break
+
+            case 'session_renamed':
+                // Session was auto-named by LLM
+                console.log(`🏷️  Session renamed: ${msg.new_name}`)
+
+                // Reload session list to show new name
+                if (this.sessionList) {
+                    this.loadSessions()
+                }
                 break
 
             default:
@@ -3106,6 +3279,268 @@ class BassiWebClient {
             console.log('✅ Answer sent successfully')
         } else {
             console.error('❌ WebSocket not open! State:', this.ws.readyState)
+        }
+    }
+
+    // ========== Session Sidebar Management ==========
+
+    initSessionSidebar() {
+        /**
+         * Initialize session sidebar event listeners and load sessions.
+         */
+        if (!this.sessionSidebarToggle || !this.sessionSidebar) {
+            console.warn('⚠️ Session sidebar elements not found')
+            return
+        }
+
+        // Toggle button click
+        this.sessionSidebarToggle.addEventListener('click', () => {
+            this.toggleSessionSidebar()
+        })
+
+        // Search input
+        if (this.sessionSearch) {
+            this.sessionSearch.addEventListener('input', (e) => {
+                this.filterSessions(e.target.value)
+            })
+        }
+
+        // New session button
+        if (this.newSessionButton) {
+            this.newSessionButton.addEventListener('click', () => {
+                this.createNewSession()
+            })
+        }
+
+        // Load sessions on init
+        this.loadSessions()
+
+        console.log('✅ Session sidebar initialized')
+    }
+
+    toggleSessionSidebar() {
+        /**
+         * Toggle session sidebar open/close state.
+         */
+        this.sessionSidebarOpen = !this.sessionSidebarOpen
+
+        if (this.sessionSidebarOpen) {
+            this.sessionSidebar.classList.add('open')
+            this.sessionSidebarToggle.classList.add('open')
+            // Reload sessions when opening
+            this.loadSessions()
+        } else {
+            this.sessionSidebar.classList.remove('open')
+            this.sessionSidebarToggle.classList.remove('open')
+        }
+    }
+
+    async loadSessions() {
+        /**
+         * Load all sessions from the API and render them.
+         */
+        try {
+            const response = await fetch('/api/sessions?limit=100&sort_by=last_activity&order=desc')
+
+            if (!response.ok) {
+                console.error('❌ Failed to load sessions:', response.status)
+                return
+            }
+
+            const data = await response.json()
+            this.allSessions = data.sessions || []
+            this.filteredSessions = this.allSessions
+
+            console.log('📚 Sessions loaded:', this.allSessions.length)
+
+            this.renderSessions()
+        } catch (error) {
+            console.error('❌ Error loading sessions:', error)
+        }
+    }
+
+    filterSessions(query) {
+        /**
+         * Filter sessions by search query.
+         */
+        const lowerQuery = query.toLowerCase().trim()
+
+        if (!lowerQuery) {
+            this.filteredSessions = this.allSessions
+        } else {
+            this.filteredSessions = this.allSessions.filter(session => {
+                const nameMatch = session.display_name?.toLowerCase().includes(lowerQuery)
+                const idMatch = session.session_id?.toLowerCase().includes(lowerQuery)
+                return nameMatch || idMatch
+            })
+        }
+
+        this.renderSessions()
+    }
+
+    groupSessionsByDate(sessions) {
+        /**
+         * Group sessions by date: Today, Yesterday, This Week, Older
+         */
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const yesterday = new Date(today)
+        yesterday.setDate(yesterday.getDate() - 1)
+        const weekStart = new Date(today)
+        weekStart.setDate(weekStart.getDate() - 7)
+
+        const groups = {
+            'Today': [],
+            'Yesterday': [],
+            'This Week': [],
+            'Older': []
+        }
+
+        sessions.forEach(session => {
+            const sessionDate = new Date(session.last_activity)
+            const sessionDay = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate())
+
+            if (sessionDay.getTime() === today.getTime()) {
+                groups['Today'].push(session)
+            } else if (sessionDay.getTime() === yesterday.getTime()) {
+                groups['Yesterday'].push(session)
+            } else if (sessionDay >= weekStart) {
+                groups['This Week'].push(session)
+            } else {
+                groups['Older'].push(session)
+            }
+        })
+
+        return groups
+    }
+
+    renderSessions() {
+        /**
+         * Render session list with date grouping.
+         */
+        if (!this.sessionList) return
+
+        if (this.filteredSessions.length === 0) {
+            this.sessionList.innerHTML = `
+                <div class="session-list-empty">
+                    ${this.allSessions.length === 0
+                        ? 'No sessions yet. Start chatting to create your first session!'
+                        : 'No sessions match your search.'}
+                </div>
+            `
+            return
+        }
+
+        const groups = this.groupSessionsByDate(this.filteredSessions)
+        let html = ''
+
+        // Render each group
+        for (const [groupName, sessions] of Object.entries(groups)) {
+            if (sessions.length === 0) continue
+
+            html += `<div class="session-group">`
+            html += `<div class="session-group-header">${groupName}</div>`
+
+            sessions.forEach(session => {
+                const isActive = session.session_id === this.sessionId
+                const messageCount = session.message_count || 0
+                const lastActivity = this.formatRelativeTime(session.last_activity)
+
+                html += `
+                    <div class="session-item ${isActive ? 'active' : ''}"
+                         data-session-id="${session.session_id}"
+                         onclick="window.bassiClient.switchSession('${session.session_id}')">
+                        <div class="session-item-name">${this.escapeHtml(session.display_name || 'Unnamed Session')}</div>
+                        <div class="session-item-meta">${messageCount} message${messageCount !== 1 ? 's' : ''} • ${lastActivity}</div>
+                    </div>
+                `
+            })
+
+            html += `</div>`
+        }
+
+        this.sessionList.innerHTML = html
+    }
+
+    formatRelativeTime(isoString) {
+        /**
+         * Format ISO timestamp as relative time (e.g., "5 minutes ago").
+         */
+        const date = new Date(isoString)
+        const now = new Date()
+        const diffMs = now - date
+        const diffSec = Math.floor(diffMs / 1000)
+        const diffMin = Math.floor(diffSec / 60)
+        const diffHour = Math.floor(diffMin / 60)
+        const diffDay = Math.floor(diffHour / 24)
+
+        if (diffSec < 60) return 'Just now'
+        if (diffMin < 60) return `${diffMin} min ago`
+        if (diffHour < 24) return `${diffHour} hour${diffHour !== 1 ? 's' : ''} ago`
+        if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`
+
+        // Format as date for older items
+        return date.toLocaleDateString()
+    }
+
+    async switchSession(sessionId) {
+        /**
+         * Switch to a different session by reconnecting WebSocket.
+         */
+        if (sessionId === this.sessionId) {
+            console.log('⚠️ Already in this session')
+            return
+        }
+
+        console.log(`🔄 Switching to session: ${sessionId}`)
+
+        // Close current WebSocket connection
+        if (this.ws) {
+            this.ws.close()
+        }
+
+        // Clear current state
+        this.conversationEl.innerHTML = ''
+        this.blocks.clear()
+        this.textBuffers.clear()
+        this.sessionFiles = []
+        this.stagedFiles = []
+
+        // Connect with new session ID
+        this.sessionId = sessionId
+        this.connect()
+
+        // Close sidebar on mobile
+        if (window.innerWidth <= 768) {
+            this.toggleSessionSidebar()
+        }
+    }
+
+    createNewSession() {
+        /**
+         * Create a new session by reconnecting without session_id.
+         */
+        console.log('➕ Creating new session')
+
+        // Close current WebSocket connection
+        if (this.ws) {
+            this.ws.close()
+        }
+
+        // Clear current state
+        this.conversationEl.innerHTML = ''
+        this.blocks.clear()
+        this.textBuffers.clear()
+        this.sessionFiles = []
+        this.stagedFiles = []
+        this.sessionId = null
+
+        // Connect without session ID to create new one
+        this.connect()
+
+        // Close sidebar on mobile
+        if (window.innerWidth <= 768) {
+            this.toggleSessionSidebar()
         }
     }
 }

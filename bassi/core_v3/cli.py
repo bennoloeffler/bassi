@@ -7,14 +7,14 @@ For CLI usage, use the main 'bassi' command instead.
 """
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-import logging
 from bassi.core_v3 import display_startup_discovery, start_web_server_v3
-from bassi.logging_utils import configure_logging
+from bassi.shared.logging_config import configure_logging
 
 # Load environment variables from .env file
 env_path = Path.cwd() / ".env"

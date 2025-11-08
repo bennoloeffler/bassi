@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.mock_agent_client import MockAgentClient
+
 
 @pytest.fixture(autouse=True)
 def test_environment(monkeypatch, tmp_path):
@@ -30,6 +32,19 @@ def test_environment(monkeypatch, tmp_path):
 
     # Set mock API key for tests
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-12345-mock-testing")
+
+    # Ensure Python can import the project modules even after chdir
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    if existing_pythonpath:
+        new_pythonpath = os.pathsep.join(
+            [str(original_cwd), existing_pythonpath]
+        )
+    else:
+        new_pythonpath = str(original_cwd)
+    monkeypatch.setenv("PYTHONPATH", new_pythonpath)
+
+    # Point uv (if used) back to the project root
+    monkeypatch.setenv("UV_PROJECT_DIR", str(original_cwd))
 
     # Use test-specific history file
     test_home = tmp_path / "home"
@@ -101,3 +116,9 @@ TERMINAL_KEYS = {
 def terminal_keys():
     """Provide terminal key sequences for testing"""
     return TERMINAL_KEYS
+
+
+@pytest.fixture
+def mock_agent_client():
+    """Provide a reusable mock AgentClient for unit tests."""
+    return MockAgentClient()

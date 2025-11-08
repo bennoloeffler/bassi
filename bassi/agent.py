@@ -11,25 +11,27 @@ Features:
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-import logging
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from bassi.logging_utils import configure_logging
-from bassi.mcp_servers import (
-    create_bash_mcp_server,
-    create_web_search_mcp_server,
+from bassi.core_v3.agent_session import SessionConfig
+from bassi.shared.agent_protocol import (
+    AgentClient,
+    AgentClientFactory,
+    build_claude_agent_options,
+    default_claude_client_factory,
 )
-from bassi.mcp_servers.task_automation_server import (
-    create_task_automation_server,
+from bassi.shared.mcp_registry import (
+    create_sdk_mcp_servers,
+    load_external_mcp_servers,
 )
 
 # Logging configured by entry point (main.py or cli.py)
@@ -146,6 +148,7 @@ provided by MCP (Model Context Protocol) servers.
 - File operations: ls, cat, cp, mv, mkdir, etc.
 - Git operations: git status, git log, git diff, etc.
 - System info: df, ps, top, etc.
+- Run bash commands when you need precise shell automation using mcp__bash__execute
 
 ## 2. Web Information & Research
 **Use: Web search tools**
@@ -221,6 +224,7 @@ Available operations:
         status_callback=None,
         resume_session_id: str | None = None,
         display_tools: bool = True,
+        client_factory: AgentClientFactory | None = None,
     ) -> None:
         """
         Initialize the Bassi Agent
@@ -229,6 +233,7 @@ Available operations:
             status_callback: Optional callback for status updates
             resume_session_id: Optional session ID to resume from
             display_tools: Whether to display available MCP servers and tools at startup (default: True)
+            client_factory: Optional AgentClientFactory for dependency injection/testing
         """
         # Log API configuration for debugging
         api_base_url = os.getenv(
@@ -240,15 +245,11 @@ Available operations:
         logger.info(f"🌐 API Endpoint: {api_base_url}")
         logger.info(f"🔑 API Key: {api_key_preview}")
 
-        # Create SDK MCP servers (in-process, no subprocess overhead)
-        self.sdk_mcp_servers = {
-            "bash": create_bash_mcp_server(),
-            "web": create_web_search_mcp_server(),
-            "task_automation": create_task_automation_server(),
-        }
+        # Create SDK MCP servers using shared module
+        self.sdk_mcp_servers = create_sdk_mcp_servers()
 
-        # Load external MCP servers from .mcp.json
-        self.external_mcp_servers = self._load_external_mcp_config()
+        # Load external MCP servers using shared module
+        self.external_mcp_servers = load_external_mcp_servers()
 
         # Combine all MCP servers
         all_mcp_servers = {
@@ -256,29 +257,28 @@ Available operations:
             **self.external_mcp_servers,
         }
 
-        # Dynamic tool discovery: allowed_tools=None means "allow ALL discovered tools"
-        # This eliminates the need to manually maintain tool lists
-        # The Agent SDK will automatically discover and inject all tools from MCP servers
-        allowed_tools = None  # Allow all discovered tools!
-
         logger.info(
             "🔓 Dynamic tool discovery enabled - all MCP tools allowed"
         )
 
-        # Agent options
-        self.options = ClaudeAgentOptions(
-            mcp_servers=all_mcp_servers,
+        self.session_config = SessionConfig(
+            allowed_tools=None,
             system_prompt=self.SYSTEM_PROMPT,
-            allowed_tools=allowed_tools,
-            permission_mode="bypassPermissions",  # Fully autonomous - no permission prompts
-            resume=resume_session_id,  # Resume previous session if provided
-            include_partial_messages=True,  # Enable streaming at token level
+            permission_mode="bypassPermissions",
+            mcp_servers=all_mcp_servers,
+            resume_session_id=resume_session_id,
+            include_partial_messages=True,
+            max_thinking_tokens=10000,
+        )
+        self.options = build_claude_agent_options(self.session_config)
+        self.client_factory: AgentClientFactory = (
+            client_factory or default_claude_client_factory
         )
 
         self.status_callback = status_callback
         self.verbose = True
         self.console = Console(force_terminal=True)
-        self.client: ClaudeSDKClient | None = None
+        self.client: AgentClient | None = None
         # Session ID - will be set by SDK on first interaction or from resume
         # SDK uses UUID format like "ae7bbada-f363-4f81-9df3-b24f3dea8f97"
         self.session_id: str | None = resume_session_id
@@ -306,6 +306,18 @@ Available operations:
         # Display available MCP servers and tools (only if display_tools=True)
         if display_tools:
             self._display_available_tools()
+
+    async def _ensure_client(self) -> None:
+        """Create and connect the AgentClient if needed."""
+        if self.client is not None:
+            return
+
+        self.client = self.client_factory(self.session_config)
+        try:
+            await self.client.connect()
+        except Exception:
+            self.client = None
+            raise
 
     def _display_available_tools(self) -> None:
         """Display available MCP servers and tools at startup (fully dynamic)"""
@@ -360,82 +372,6 @@ Available operations:
 
         except Exception as e:
             logger.warning(f"Error displaying available tools: {e}")
-
-    def _load_external_mcp_config(self) -> dict:
-        """
-        Load external MCP server configuration from .mcp.json
-
-        Returns:
-            Dict mapping server name to MCP server config
-        """
-        mcp_config_file = Path.cwd() / ".mcp.json"
-
-        if not mcp_config_file.exists():
-            logger.info(
-                "No .mcp.json file found - skipping external MCP servers"
-            )
-            return {}
-
-        try:
-            with open(mcp_config_file) as f:
-                config = json.load(f)
-
-            mcp_servers_config = config.get("mcpServers", {})
-
-            if not mcp_servers_config:
-                logger.info("No MCP servers configured in .mcp.json")
-                return {}
-
-            # Load environment variables for substitution
-            from dotenv import load_dotenv
-
-            load_dotenv()
-
-            # Convert .mcp.json format to Claude SDK format
-            external_servers = {}
-
-            for server_name, server_config in mcp_servers_config.items():
-                command = server_config.get("command")
-                args = server_config.get("args", [])
-                env = server_config.get("env", {})
-
-                # Substitute environment variables in env values
-                resolved_env = {}
-                for key, value in env.items():
-                    if (
-                        isinstance(value, str)
-                        and value.startswith("${")
-                        and value.endswith("}")
-                    ):
-                        # Extract variable name: ${VAR_NAME} -> VAR_NAME
-                        var_name = value[2:-1]
-                        # Handle default values: ${VAR_NAME:-default}
-                        if ":-" in var_name:
-                            var_name, default = var_name.split(":-", 1)
-                            resolved_env[key] = os.getenv(var_name, default)
-                        else:
-                            resolved_env[key] = os.getenv(var_name, "")
-                    else:
-                        resolved_env[key] = value
-
-                # Create MCP server config in Claude SDK format
-                external_servers[server_name] = {
-                    "command": command,
-                    "args": args,
-                    "env": resolved_env,
-                }
-
-                logger.info(f"📦 Loaded external MCP server: {server_name}")
-                logger.debug(f"   Command: {command}")
-                logger.debug(f"   Args: {args}")
-                logger.debug(f"   Env vars: {list(resolved_env.keys())}")
-
-            return external_servers
-
-        except Exception as e:
-            logger.error(f"Error loading .mcp.json: {e}")
-            logger.exception("Full traceback:")
-            return {}
 
     async def interrupt(self) -> None:
         """Interrupt the current agent run"""
@@ -524,10 +460,7 @@ Available operations:
 
         try:
             # Create client if it doesn't exist (for conversation continuity)
-            if self.client is None:
-                logger.debug("Creating new ClaudeSDKClient")
-                self.client = ClaudeSDKClient(options=self.options)
-                await self.client.__aenter__()
+            await self._ensure_client()
 
             # Send the query
             # Session resumption is handled by ClaudeAgentOptions.resume
@@ -980,14 +913,13 @@ Available operations:
     async def reset(self) -> None:
         """Reset conversation - will create new client on next chat"""
         if self.client:
-            # Properly exit the client context
             try:
-                # Suppress all exceptions during cleanup to avoid issues with KeyboardInterrupt
-                await self.client.__aexit__(None, None, None)
+                await self.client.disconnect()
             except (Exception, KeyboardInterrupt) as e:
                 logger.warning(f"Error closing client during reset: {e}")
             finally:
                 self.client = None
+        self.session_config.resume_session_id = None
 
         self.console.print("[dim]Conversation reset.[/dim]")
 
@@ -1006,8 +938,7 @@ Available operations:
         """Clean up resources properly on shutdown"""
         if self.client:
             try:
-                # Properly close the client context
-                await self.client.__aexit__(None, None, None)
+                await self.client.disconnect()
             except (Exception, KeyboardInterrupt) as e:
                 logger.warning(f"Error during cleanup: {e}")
             finally:

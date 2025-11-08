@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from bassi.agent import BassiAgent
+from bassi.shared.sdk_loader import SDK_AVAILABLE
 
 
 class TestUseCase1FirstTimeStartup:
@@ -81,9 +82,8 @@ class TestUseCase3BasicConversation:
     @pytest.mark.integration
     async def test_chat_streaming_response(self):
         """Test basic conversation with streaming response"""
-        # This test requires ANTHROPIC_API_KEY
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            pytest.skip("ANTHROPIC_API_KEY not set")
+        if not SDK_AVAILABLE or not os.getenv("ANTHROPIC_API_KEY"):
+            pytest.skip("Agent SDK or API key not available")
 
         agent = BassiAgent()
 
@@ -221,8 +221,8 @@ class TestUseCase8ResetConversation:
         # Verify client cleared
         assert agent.client is None
 
-        # Verify __aexit__ called
-        mock_client.__aexit__.assert_called_once()
+        # Verify disconnect called
+        mock_client.disconnect.assert_called_once()
 
 
 class TestUseCase13InterruptAgent:

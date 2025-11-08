@@ -15,6 +15,7 @@ Key bindings tested:
 
 import os
 import signal
+import sys
 
 import pexpect
 import pytest
@@ -31,8 +32,9 @@ class TestKeyBindings:
         env["ANTHROPIC_API_KEY"] = "test-key-12345-mock"
 
         # Spawn bassi with PTY
+        command = f"{sys.executable} -m bassi.main"
         child = pexpect.spawn(
-            "uv run python -m bassi.main",
+            command,
             env=env,
             encoding="utf-8",
             timeout=10,
@@ -84,7 +86,7 @@ class TestKeyBindings:
 
     def test_ctrl_c_during_prompt_exits_app(self, bassi_session):
         """Test that Ctrl+C at prompt exits the application (standard Unix behavior)"""
-        # Press Ctrl+C to exit
+        # Press Ctrl+C to exit (send SIGINT)
         bassi_session.sendcontrol("c")
 
         # Should exit (EOF)

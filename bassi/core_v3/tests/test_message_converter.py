@@ -4,7 +4,11 @@ Unit tests for message_converter.
 Tests every function and every message type conversion.
 """
 
-from claude_agent_sdk.types import (
+from bassi.core_v3.message_converter import (
+    convert_message_to_websocket,
+    convert_messages_batch,
+)
+from bassi.shared.sdk_types import (
     AssistantMessage,
     ResultMessage,
     SystemMessage,
@@ -13,11 +17,6 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
-)
-
-from bassi.core_v3.message_converter import (
-    convert_message_to_websocket,
-    convert_messages_batch,
 )
 
 # Test model constant
@@ -292,8 +291,9 @@ class TestConvertSystemMessage:
 
         assert len(events) == 1
         assert events[0]["type"] == "system"
-        # SystemMessage has data dict, need to extract content
-        assert "text" in events[0]
+        assert events[0]["subtype"] == "reminder"
+        # SystemMessage unpacks data dict directly into event
+        assert events[0]["content"] == "System reminder: Be helpful"
 
 
 class TestConvertUserMessage:
@@ -310,8 +310,9 @@ class TestConvertUserMessage:
         assert events[0]["text"] == "Hello, Claude!"
 
     def test_user_message_non_string(self):
-        """Test user message with non-string content"""
-        message = UserMessage(content=["multiple", "parts"])
+        """Test user message with non-string content (dict or other)"""
+        # UserMessage with dict content gets stringified
+        message = UserMessage(content={"key": "value"})
 
         events = convert_message_to_websocket(message)
 
@@ -319,6 +320,7 @@ class TestConvertUserMessage:
         assert events[0]["type"] == "user"
         # Should convert to string
         assert isinstance(events[0]["text"], str)
+        assert "key" in events[0]["text"]  # Dict was stringified
 
 
 class TestConvertResultMessage:

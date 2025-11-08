@@ -7,7 +7,7 @@ and the web UI's expected event format for WebSocket streaming.
 
 from typing import Any
 
-from claude_agent_sdk.types import (
+from bassi.shared.sdk_types import (
     AssistantMessage,
     ContentBlock,
     Message,

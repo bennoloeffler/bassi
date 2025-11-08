@@ -7,6 +7,8 @@ Note: These are basic tests. Full integration tests require API key.
 import pytest
 
 from bassi.config import ConfigManager
+from bassi.shared.sdk_types import AssistantMessage, ResultMessage, TextBlock
+from tests.fixtures.mock_agent_client import MockAgentClient
 
 
 def test_agent_imports():
@@ -111,3 +113,181 @@ def test_agent_reset():
 
     # Clean up
     del os.environ["ANTHROPIC_API_KEY"]
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_with_mock_client(monkeypatch):
+    """BassiAgent supports dependency injection via AgentClientFactory."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    mock_client = MockAgentClient()
+    mock_client.queue_response(
+        AssistantMessage(
+            content=[TextBlock(text="hi there")], model="test-model"
+        ),
+        ResultMessage(
+            subtype="complete",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            usage={"input_tokens": 1, "output_tokens": 2},
+        ),
+    )
+
+    agent = BassiAgent(client_factory=lambda _config: mock_client)
+
+    messages = []
+    async for item in agent.chat("Hello world"):
+        messages.append(item)
+
+    assert len(messages) == 2
+    assert mock_client.sent_prompts[0]["prompt"] == "Hello world"
+
+
+@pytest.mark.asyncio
+async def test_agent_interrupt_with_mock(monkeypatch):
+    """Test that interrupt() delegates to the mock client."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    mock_client = MockAgentClient()
+    mock_client.queue_response(
+        AssistantMessage(
+            content=[TextBlock(text="counting")], model="test-model"
+        ),
+        ResultMessage(
+            subtype="complete",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            usage={"input_tokens": 1, "output_tokens": 2},
+        ),
+    )
+
+    agent = BassiAgent(client_factory=lambda _config: mock_client)
+
+    # Start a query
+    await agent._ensure_client()
+
+    # Interrupt should delegate to client
+    await agent.interrupt()
+
+    assert mock_client.interrupted is True
+
+
+@pytest.mark.asyncio
+async def test_agent_verbose_mode_with_mock(monkeypatch):
+    """Test that verbose mode can be toggled with mock client."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    mock_client = MockAgentClient()
+
+    agent = BassiAgent(
+        client_factory=lambda _config: mock_client, display_tools=False
+    )
+
+    # Initially verbose mode is ON (default True)
+    assert agent.verbose is True
+
+    # Toggle verbose mode to OFF
+    result = agent.toggle_verbose()
+
+    assert agent.verbose is False
+    assert result is False
+
+    # Toggle again to ON
+    result = agent.toggle_verbose()
+
+    assert agent.verbose is True
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_agent_accepts_custom_factory(monkeypatch):
+    """Test that agent accepts and uses custom client factory."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    factory_called = []
+
+    def custom_factory(config):
+        factory_called.append(config)
+        mock = MockAgentClient()
+        mock.queue_response(
+            AssistantMessage(
+                content=[TextBlock(text="custom")], model="test-model"
+            ),
+            ResultMessage(
+                subtype="complete",
+                duration_ms=100,
+                duration_api_ms=80,
+                is_error=False,
+                num_turns=1,
+                usage={"input_tokens": 1, "output_tokens": 2},
+            ),
+        )
+        return mock
+
+    agent = BassiAgent(client_factory=custom_factory, display_tools=False)
+
+    # Factory should not be called until first chat
+    assert len(factory_called) == 0
+
+    # Chat should trigger factory
+    messages = []
+    async for item in agent.chat("Test"):
+        messages.append(item)
+
+    # Factory should have been called once
+    assert len(factory_called) == 1
+    # Should have received messages (either typed events or raw SDK messages)
+    assert len(messages) >= 1
+
+
+@pytest.mark.asyncio
+async def test_agent_reset_clears_mock_client(monkeypatch):
+    """Test that reset() clears mock client state properly."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    mock_client = MockAgentClient()
+    mock_client.queue_response(
+        AssistantMessage(
+            content=[TextBlock(text="before reset")], model="test-model"
+        ),
+        ResultMessage(
+            subtype="complete",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            usage={"input_tokens": 1, "output_tokens": 2},
+        ),
+    )
+
+    agent = BassiAgent(client_factory=lambda _config: mock_client)
+
+    # Chat to create client
+    async for _ in agent.chat("First"):
+        pass
+
+    assert agent.client is not None
+    assert mock_client.connected is True
+
+    # Reset should clear client
+    await agent.reset()
+
+    assert agent.client is None
+    assert mock_client.connected is False

@@ -329,3 +329,73 @@ class TestSessionLoading:
 
         # Should exist now
         assert SessionWorkspace.exists(session_id, base_path=tmp_path)
+
+
+class TestWorkspaceContext:
+    """Test workspace context generation for agent awareness."""
+
+    def test_generates_workspace_context(self, temp_workspace):
+        """Should generate markdown workspace context."""
+        context = temp_workspace.get_workspace_context()
+
+        assert isinstance(context, str)
+        assert "# Your Workspace" in context
+        assert temp_workspace.session_id in context
+        assert "DATA_FROM_USER" in context
+        assert "RESULTS_FROM_AGENT" in context
+        assert "SCRIPTS_FROM_AGENT" in context
+        assert "DATA_FROM_AGENT" in context
+
+    def test_workspace_context_includes_instructions(self, temp_workspace):
+        """Should include file path instructions."""
+        context = temp_workspace.get_workspace_context()
+
+        assert "## File Path Instructions" in context
+        assert f"chats/{temp_workspace.session_id}/" in context
+
+    @pytest.mark.asyncio
+    async def test_workspace_context_lists_uploaded_files(
+        self, temp_workspace, mock_upload_file
+    ):
+        """Should list uploaded files in workspace context."""
+        # Upload a file
+        file = mock_upload_file("test.txt", b"content")
+        await temp_workspace.upload_file(file)
+
+        context = temp_workspace.get_workspace_context()
+
+        assert "## Available Files" in context
+        assert "test_" in context  # File will have hash in name
+
+    def test_workspace_context_shows_no_files_message(self, temp_workspace):
+        """Should show message when no files are uploaded."""
+        context = temp_workspace.get_workspace_context()
+
+        assert "No files have been uploaded yet" in context
+
+    def test_get_output_path_results(self, temp_workspace):
+        """Should generate correct path for results category."""
+        path = temp_workspace.get_output_path("results", "report.pdf")
+
+        assert "RESULTS_FROM_AGENT" in path
+        assert "report.pdf" in path
+        assert temp_workspace.session_id in path
+
+    def test_get_output_path_scripts(self, temp_workspace):
+        """Should generate correct path for scripts category."""
+        path = temp_workspace.get_output_path("scripts", "analyze.py")
+
+        assert "SCRIPTS_FROM_AGENT" in path
+        assert "analyze.py" in path
+
+    def test_get_output_path_data(self, temp_workspace):
+        """Should generate correct path for data category."""
+        path = temp_workspace.get_output_path("data", "output.json")
+
+        assert "DATA_FROM_AGENT" in path
+        assert "output.json" in path
+
+    def test_get_output_path_rejects_invalid_category(self, temp_workspace):
+        """Should raise error for invalid category."""
+        with pytest.raises(ValueError, match="Invalid category"):
+            temp_workspace.get_output_path("invalid", "file.txt")

@@ -25,7 +25,7 @@ def create_bassi_tools(question_service: InteractiveQuestionService) -> list:
     Returns:
         List of tool functions that can be registered with MCP server
     """
-    from claude_agent_sdk import tool
+    from bassi.shared.sdk_loader import tool
 
     @tool(
         "AskUserQuestion",

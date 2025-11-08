@@ -67,14 +67,18 @@ testpaths = ["tests", "bassi/core_v3/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -n auto"  # pytest-xdist parallel execution (E2E tests use --dist no via marker)
+asyncio_mode = "auto"  # Fix event loop conflicts with pytest-asyncio
+asyncio_default_fixture_loop_scope = "function"  # Isolate event loops per test
 markers = [
     "integration: marks tests as integration tests (require API keys)",
     "asyncio: marks tests as async",
+    "e2e: marks tests as end-to-end Playwright tests (run separately)",
 ]
 
 [dependency-groups]
 dev = [
     "pexpect>=4.9.0",
     "pytest-playwright>=0.7.1",
+    "pytest-xdist>=3.8.0",
 ]

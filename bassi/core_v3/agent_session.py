@@ -1,5 +1,5 @@
 """
-Agent Session - Wrapper around Claude Agent SDK's ClaudeSDKClient.
+Agent Session - Wrapper around the Claude Agent SDK client.
 
 This module provides a clean interface to the Agent SDK while adding:
 - Session lifecycle management
@@ -13,8 +13,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-from claude_agent_sdk.types import (
+from bassi.shared.agent_protocol import (
+    AgentClient,
+    AgentClientFactory,
+    default_claude_client_factory,
+    resolve_model_id,
+)
+from bassi.shared.sdk_types import (
     AssistantMessage,
     Message,
     ResultMessage,
@@ -28,7 +33,7 @@ class SessionConfig:
     """Configuration for a Bassi agent session"""
 
     # Core settings
-    allowed_tools: list[str] = field(
+    allowed_tools: list[str] | None = field(
         default_factory=lambda: ["Bash", "ReadFile", "WriteFile"]
     )
     system_prompt: Optional[str] = None
@@ -54,6 +59,11 @@ class SessionConfig:
 
     # Settings sources
     setting_sources: Optional[list[str]] = None
+
+    # Resume / streaming support
+    resume_session_id: Optional[str] = None
+    include_partial_messages: bool = False
+    max_thinking_tokens: int = 10000
 
 
 @dataclass
@@ -92,32 +102,26 @@ class BassiAgentSession:
         ```
     """
 
-    def __init__(self, config: Optional[SessionConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SessionConfig] = None,
+        client_factory: Optional[AgentClientFactory] = None,
+    ):
         """
         Initialize agent session.
 
         Args:
             config: Session configuration. If None, uses defaults.
+            client_factory: Optional factory for creating AgentClient instances.
         """
         self.config = config or SessionConfig()
         self.session_id = str(uuid.uuid4())
-
-        # Convert our config to Agent SDK options
-        self.sdk_options = ClaudeAgentOptions(
-            model=self.get_model_id(),  # Use :thinking suffix if enabled
-            allowed_tools=self.config.allowed_tools,
-            system_prompt=self.config.system_prompt,
-            permission_mode=self.config.permission_mode,
-            mcp_servers=self.config.mcp_servers,
-            cwd=self.config.cwd,
-            can_use_tool=self.config.can_use_tool,
-            hooks=self.config.hooks,
-            setting_sources=self.config.setting_sources,
-            max_thinking_tokens=10000,  # Enable extended thinking with 10K token budget
+        self.client_factory: AgentClientFactory = (
+            client_factory or default_claude_client_factory
         )
 
         # Client instance (created on connect)
-        self.client: Optional[ClaudeSDKClient] = None
+        self.client: Optional[AgentClient] = None
 
         # Session state
         self._connected = False
@@ -126,9 +130,7 @@ class BassiAgentSession:
 
     def get_model_id(self) -> str:
         """Get the effective model ID based on thinking mode."""
-        if self.config.thinking_mode:
-            return f"{self.config.model_id}:thinking"
-        return self.config.model_id
+        return resolve_model_id(self.config)
 
     async def __aenter__(self):
         """Context manager entry"""
@@ -158,13 +160,9 @@ class BassiAgentSession:
             logger.info("🔶 [SESSION] Already connected, returning")
             return
 
-        logger.info(
-            f"🔶 [SESSION] Creating ClaudeSDKClient with options: {self.sdk_options}"
-        )
-        self.client = ClaudeSDKClient(options=self.sdk_options)
-        logger.info(
-            "🔶 [SESSION] ClaudeSDKClient created, calling client.connect()..."
-        )
+        logger.info("🔶 [SESSION] Creating AgentClient via factory")
+        self.client = self.client_factory(self.config)
+        logger.info("🔶 [SESSION] AgentClient created, calling connect()...")
         await self.client.connect()
         logger.info("🔶 [SESSION] client.connect() completed successfully")
         self._connected = True
@@ -177,6 +175,7 @@ class BassiAgentSession:
 
         await self.client.disconnect()
         self._connected = False
+        self.client = None
 
     async def update_thinking_mode(self, thinking_mode: bool):
         """
@@ -198,20 +197,6 @@ class BassiAgentSession:
 
         # Update config
         self.config.thinking_mode = thinking_mode
-
-        # Recreate SDK options with new model
-        self.sdk_options = ClaudeAgentOptions(
-            model=self.get_model_id(),  # Will use :thinking suffix if enabled
-            allowed_tools=self.config.allowed_tools,
-            system_prompt=self.config.system_prompt,
-            permission_mode=self.config.permission_mode,
-            mcp_servers=self.config.mcp_servers,
-            cwd=self.config.cwd,
-            can_use_tool=self.config.can_use_tool,
-            hooks=self.config.hooks,
-            setting_sources=self.config.setting_sources,
-            max_thinking_tokens=10000,
-        )
 
         # If already connected, reconnect with new client
         if self._connected:

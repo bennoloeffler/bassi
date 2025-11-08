@@ -68,39 +68,34 @@ def print_welcome() -> None:
     )
 
 
-def get_user_input(prompt: str = "You: ") -> str | None:
-    """Get user input with simple readline support
+async def get_user_input(prompt: str = "You: ") -> str | None:
+    """Get user input with simple readline support."""
 
-    Returns:
-        User input string, or None on EOF/interrupt
-    """
-    try:
-        # Use simple input() with readline support
+    import anyio
+
+    def _readline_input() -> str | None:
         import readline
 
-        # Setup history file
         history_file = os.path.expanduser("~/.bassi_history")
         try:
             readline.read_history_file(history_file)
         except FileNotFoundError:
             pass
 
-        # Set max history entries
         readline.set_history_length(1000)
 
-        # Get input
-        user_input = input(prompt)
+        try:
+            user_input = input(prompt)
+            readline.write_history_file(history_file)
+            return user_input
+        except EOFError:
+            return None
 
-        # Save to history
-        readline.write_history_file(history_file)
-
-        return user_input
-
-    except EOFError:
-        return None
-    except KeyboardInterrupt:
-        # Re-raise to be handled at higher level
-        raise
+    try:
+        return await anyio.to_thread.run_sync(_readline_input)
+    except anyio.get_cancelled_exc_class():
+        # Convert cancellation (e.g., SIGINT) into KeyboardInterrupt semantics
+        raise KeyboardInterrupt
 
 
 def print_config() -> None:
@@ -253,17 +248,26 @@ def parse_args():
 
 async def cli_main_loop(agent: BassiAgent) -> None:
     """Run the CLI main loop (extracted for clarity)"""
+    import signal
     import termios
 
     # Ensure terminal is in sane cooked mode at startup
     try:
         fd = sys.stdin.fileno()
         attrs = termios.tcgetattr(fd)
-        # Enable canonical mode and echo
-        attrs[3] |= termios.ICANON | termios.ECHO
+        # Enable canonical mode, echo, and signal handling (Ctrl+C)
+        attrs[3] |= termios.ICANON | termios.ECHO | termios.ISIG
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
     except Exception:
         pass  # Not a TTY, ignore
+
+    # Ensure SIGINT immediately raises KeyboardInterrupt within CLI loop
+    previous_sigint = signal.getsignal(signal.SIGINT)
+
+    def _cli_sigint_handler(sig, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _cli_sigint_handler)
 
     try:
         print_welcome()
@@ -374,7 +378,7 @@ async def cli_main_loop(agent: BassiAgent) -> None:
         while True:
             try:
                 # Get user input (simple readline-based)
-                user_input = get_user_input("You: ")
+                user_input = await get_user_input("You: ")
 
                 if user_input is None:
                     # EOF - exit gracefully
@@ -511,14 +515,17 @@ async def cli_main_loop(agent: BassiAgent) -> None:
                 continue
 
     except KeyboardInterrupt:
-        # Handled by finally block or outer main()
-        pass
+        # Propagate so outer handlers can exit cleanly
+        raise
 
     except Exception as e:
         console.print(f"[bold red]Fatal error:[/bold red] {str(e)}\n")
         sys.exit(1)
 
     finally:
+        # Restore previous SIGINT handler
+        signal.signal(signal.SIGINT, previous_sigint)
+
         # Clean up agent resources
         try:
             if "agent" in locals() and agent:
@@ -530,7 +537,7 @@ async def cli_main_loop(agent: BassiAgent) -> None:
         try:
             fd = sys.stdin.fileno()
             attrs = termios.tcgetattr(fd)
-            attrs[3] |= termios.ICANON | termios.ECHO
+            attrs[3] |= termios.ICANON | termios.ECHO | termios.ISIG
             termios.tcsetattr(fd, termios.TCSANOW, attrs)
         except Exception:
             pass
@@ -648,7 +655,8 @@ async def main_async() -> None:
 def main() -> None:
     """Entry point - runs async main"""
     # Configure logging once for CLI mode
-    from bassi.logging_utils import configure_logging
+    from bassi.shared.logging_config import configure_logging
+
     configure_logging()
 
     # Enable DEBUG logging via environment variable
@@ -660,7 +668,7 @@ def main() -> None:
     except KeyboardInterrupt:
         # Graceful exit on Ctrl+C
         console.print("\n[bold blue]Goodbye![/bold blue] 👋\n")
-        sys.exit(0)
+        os._exit(0)
 
 
 if __name__ == "__main__":
