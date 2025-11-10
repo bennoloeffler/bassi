@@ -188,6 +188,279 @@ class TestBassiAgentSession:
         assert session._connected is False
         assert mock_agent_client.connected is False
 
+    @pytest.mark.asyncio
+    async def test_connect_when_already_connected(self, mock_agent_client):
+        """Test connect() returns early when already connected."""
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Connect first time
+        await session.connect()
+        assert session._connected is True
+        assert mock_agent_client.connect_count == 1
+
+        # Connect again - should return early
+        await session.connect()
+        assert session._connected is True
+        # Connect should not be called again
+        assert mock_agent_client.connect_count == 1
+
+    @pytest.mark.asyncio
+    async def test_disconnect_when_not_connected(self, mock_agent_client):
+        """Test disconnect() returns early when not connected."""
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Disconnect without connecting first
+        await session.disconnect()
+        # Should not raise, just return early
+        assert session._connected is False
+        assert mock_agent_client.disconnect_count == 0
+
+    @pytest.mark.asyncio
+    async def test_interrupt_when_not_connected(self, mock_agent_client):
+        """Test interrupt() returns early when not connected."""
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Interrupt without connecting first
+        await session.interrupt()
+        # Should not raise, just return early
+        assert mock_agent_client.interrupted is False
+
+    @pytest.mark.asyncio
+    async def test_get_server_info_when_not_connected(
+        self, mock_agent_client
+    ):
+        """Test get_server_info() returns None when not connected."""
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Get server info without connecting first
+        info = await session.get_server_info()
+        assert info is None
+
+    @pytest.mark.asyncio
+    async def test_get_server_info_when_connected(self, mock_agent_client):
+        """Test get_server_info() returns server info when connected."""
+        # Set up mock server info
+        mock_agent_client.server_info = {
+            "commands": ["/help", "/commit"],
+            "capabilities": ["tools", "mcp"],
+        }
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Connect first
+        await session.connect()
+
+        # Get server info
+        info = await session.get_server_info()
+        assert info is not None
+        assert info["commands"] == ["/help", "/commit"]
+        assert info["capabilities"] == ["tools", "mcp"]
+
+    @pytest.mark.asyncio
+    async def test_update_thinking_mode(self, mock_agent_client):
+        """Test update_thinking_mode() reconnects with new model."""
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Initial state: thinking_mode = False
+        assert session.config.thinking_mode is False
+        initial_model = session.get_model_id()
+
+        # Update thinking mode while not connected
+        await session.update_thinking_mode(True)
+        assert session.config.thinking_mode is True
+        # Should not have connected/disconnected
+        assert mock_agent_client.connect_count == 0
+
+        # Connect with thinking mode enabled
+        await session.connect()
+        assert session._connected is True
+        assert mock_agent_client.connect_count == 1
+
+        # Update thinking mode while connected - should reconnect
+        await session.update_thinking_mode(False)
+        assert session.config.thinking_mode is False
+        # Should have disconnected and reconnected
+        assert mock_agent_client.disconnect_count == 1
+        assert mock_agent_client.connect_count == 2
+        assert session._connected is True
+
+    @pytest.mark.asyncio
+    async def test_multimodal_query(self, mock_agent_client):
+        """Test query with multimodal content (list of content blocks)."""
+        mock_agent_client.queue_response(
+            AssistantMessage(
+                content=[TextBlock(text="I see an image")],
+                model="test-model",
+            ),
+            ResultMessage(
+                subtype="complete",
+                duration_ms=100,
+                duration_api_ms=80,
+                is_error=False,
+                num_turns=1,
+                session_id="test-session",
+                usage={"input_tokens": 10, "output_tokens": 5},
+                total_cost_usd=0.002,
+            ),
+        )
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        # Create multimodal content blocks (text + image)
+        content_blocks = [
+            {"type": "text", "text": "What's in this image?"},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "fake_base64_data",
+                },
+            },
+        ]
+
+        results = []
+        async for message in session.query(content_blocks):
+            results.append(message)
+
+        assert len(results) == 2
+        assert session.stats.message_count == 1
+
+        # Verify the prompt was sent as a list (multimodal)
+        sent_prompt = mock_agent_client.sent_prompts[0]["prompt"]
+        # For multimodal, prompt is an async generator, so check session_id
+        assert mock_agent_client.sent_prompts[0]["session_id"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_stats_update_from_assistant_with_tool_use(
+        self, mock_agent_client
+    ):
+        """Test stats update when AssistantMessage has ToolUseBlock."""
+        from bassi.shared.sdk_types import ToolUseBlock
+
+        mock_agent_client.queue_response(
+            AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="tool_1",
+                        name="test_tool",
+                        input={"arg": "value"},
+                    ),
+                    ToolUseBlock(
+                        id="tool_2",
+                        name="another_tool",
+                        input={},
+                    ),
+                ],
+                model="test-model",
+            ),
+            ResultMessage(
+                subtype="complete",
+                duration_ms=100,
+                duration_api_ms=80,
+                is_error=False,
+                num_turns=1,
+                session_id="test-session",
+                usage={"input_tokens": 5, "output_tokens": 3},
+                total_cost_usd=0.001,
+            ),
+        )
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        results = []
+        async for message in session.query("Use tools"):
+            results.append(message)
+
+        # Should have counted 2 tool calls
+        assert session.stats.tool_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_stats_update_from_assistant_without_tool_use(
+        self, mock_agent_client
+    ):
+        """Test stats update when AssistantMessage has no ToolUseBlock."""
+        mock_agent_client.queue_response(
+            AssistantMessage(
+                content=[TextBlock(text="Just text, no tools")],
+                model="test-model",
+            ),
+            ResultMessage(
+                subtype="complete",
+                duration_ms=100,
+                duration_api_ms=80,
+                is_error=False,
+                num_turns=1,
+                session_id="test-session",
+                usage={"input_tokens": 5, "output_tokens": 3},
+                total_cost_usd=0.001,
+            ),
+        )
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        results = []
+        async for message in session.query("No tools"):
+            results.append(message)
+
+        # Should have counted 0 tool calls
+        assert session.stats.tool_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_stats_update_from_result_without_attributes(
+        self, mock_agent_client
+    ):
+        """Test stats update when ResultMessage lacks token/cost attributes."""
+        # Create a minimal ResultMessage without token/cost attributes
+        minimal_result = ResultMessage(
+            subtype="complete",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+            usage={},  # Empty usage - no tokens
+            # No total_cost_usd attribute
+        )
+
+        mock_agent_client.queue_response(
+            AssistantMessage(
+                content=[TextBlock(text="response")], model="test-model"
+            ),
+            minimal_result,
+        )
+
+        session = BassiAgentSession(
+            client_factory=lambda _: mock_agent_client,
+        )
+
+        results = []
+        async for message in session.query("Test"):
+            results.append(message)
+
+        # Stats should still work, just with 0 values
+        assert session.stats.total_input_tokens == 0
+        assert session.stats.total_output_tokens == 0
+        assert session.stats.total_cost_usd == 0.0
+
 
 @pytest.mark.skipif(
     not SDK_AVAILABLE, reason="claude_agent_sdk not installed"

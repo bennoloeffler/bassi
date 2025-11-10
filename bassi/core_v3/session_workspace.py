@@ -45,9 +45,6 @@ class SessionWorkspace:
         "DATA_FROM_AGENT",
     ]
 
-    # Symlink directory for human-readable session names
-    SYMLINK_DIR = Path("chats-human-readable")
-
     def __init__(
         self,
         session_id: str,
@@ -66,6 +63,11 @@ class SessionWorkspace:
         self.base_path = base_path
         self.physical_path = base_path / session_id
         self._upload_lock = asyncio.Lock()
+
+        # Symlink directory for human-readable session names
+        # Place it as sibling to base_path (e.g., if base_path="chats", symlink_dir="chats-human-readable")
+        # Use with_name to handle both relative (Path("chats")) and absolute (tmp_path) paths
+        self.SYMLINK_DIR = base_path.with_name("chats-human-readable")
 
         if create:
             self._create_directory_structure()
@@ -148,19 +150,19 @@ class SessionWorkspace:
         Create initial symlink with timestamp and placeholder name.
 
         Format: {iso-datetime}__new-session__{short-id}
-        Example: 2025-11-08T14-30-45__new-session__a1b2c3d4
+        Example: 2025-11-08T14-30-45-123456__new-session__a1b2c3d4
         """
         # Ensure symlink directory exists
         self.SYMLINK_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Generate symlink name
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        # Generate symlink name with milliseconds for test robustness
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
         short_id = self.session_id[:8]
         symlink_name = f"{timestamp}__new-session__{short_id}"
 
-        # Create symlink
+        # Create symlink with correct relative target
         symlink_path = self.SYMLINK_DIR / symlink_name
-        target = Path("..") / "chats" / self.session_id
+        target = Path("..") / self.base_path.name / self.session_id
 
         try:
             os.symlink(target, symlink_path)
@@ -189,8 +191,8 @@ class SessionWorkspace:
         # Ensure symlink directory exists
         self.SYMLINK_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Generate new symlink name
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        # Generate new symlink name with milliseconds for test robustness
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
         short_id = self.session_id[:8]
         clean_name = self._sanitize_name(new_name)
 
@@ -199,9 +201,9 @@ class SessionWorkspace:
 
         symlink_name = f"{timestamp}__{clean_name}__{short_id}"
 
-        # Create new symlink
+        # Create new symlink with correct relative target
         symlink_path = self.SYMLINK_DIR / symlink_name
-        target = Path("..") / "chats" / self.session_id
+        target = Path("..") / self.base_path.name / self.session_id
 
         try:
             os.symlink(target, symlink_path)
@@ -233,7 +235,7 @@ class SessionWorkspace:
                     )
 
     def _remove_symlink(self) -> None:
-        """Remove existing symlink if it exists."""
+        """Remove existing symlink if it exists and clear metadata."""
         symlink_name = self.metadata.get("symlink_name")
 
         if symlink_name:
@@ -246,6 +248,10 @@ class SessionWorkspace:
                 # Race condition: symlink already removed by another process
                 # or never existed - both cases are fine
                 pass
+
+            # Clear symlink metadata
+            self.metadata["symlink_name"] = None
+            self._save_metadata()
 
     def delete(self) -> None:
         """
@@ -419,6 +425,70 @@ class SessionWorkspace:
         )
         self.metadata["last_activity"] = timestamp.isoformat()
         self._save_metadata()
+
+    def load_conversation_history(self) -> list[dict]:
+        """
+        Load conversation history from history.md.
+
+        Returns:
+            List of message dicts with role, content, timestamp
+
+        Format in history.md:
+            ## User - 2025-11-09T10:30:00.123456
+
+            message content here
+
+            ## Assistant - 2025-11-09T10:30:05.654321
+
+            assistant response here
+        """
+        history_path = self.physical_path / "history.md"
+
+        if not history_path.exists():
+            return []
+
+        messages = []
+        current_message = None
+
+        with open(history_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\n")
+
+                # Check for message header: ## User - timestamp or ## Assistant - timestamp
+                if line.startswith("## "):
+                    # Save previous message if exists
+                    if current_message is not None:
+                        messages.append(current_message)
+
+                    # Parse new message header
+                    # Format: ## User - 2025-11-09T10:30:00.123456
+                    parts = line[3:].split(" - ", 1)
+                    if len(parts) == 2:
+                        role = parts[0].strip().lower()
+                        timestamp_str = parts[1].strip()
+
+                        current_message = {
+                            "role": role,
+                            "content": "",
+                            "timestamp": timestamp_str,
+                        }
+                elif current_message is not None:
+                    # Accumulate content lines (skip empty lines between sections)
+                    if line or current_message["content"]:
+                        if current_message["content"]:
+                            current_message["content"] += "\n" + line
+                        else:
+                            current_message["content"] = line
+
+        # Don't forget the last message
+        if current_message is not None:
+            messages.append(current_message)
+
+        # Clean up content (strip trailing newlines)
+        for msg in messages:
+            msg["content"] = msg["content"].strip()
+
+        return messages
 
     @property
     def display_name(self) -> str:

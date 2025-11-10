@@ -30,6 +30,7 @@ bassi has **TWO separate systems** that serve different purposes:
 - **Technical Requirements**: `docs/requirements.md` - Tech stack, data models, security
 - **Dual Mode**: `docs/DUAL_MODE_IMPLEMENTATION.md` - V1/V3 architecture details
 - **Black Box Design**: `CLAUDE_BBS.md` - Design principles (read when architecting)
+- **Testing Guide**: `CLAUDE_TESTS.md` - Comprehensive testing patterns and best practices (ALWAYS read before writing tests)
 
 ## Key Features Documentation
 Features are described in `docs/features_concepts/<feature_name>.md`
@@ -83,7 +84,7 @@ you may find all the hints you need.
 1. Start by analysing features and document the feature and update the documentation.
    Features get a name and the place to document them are here:
    `docs/features_concepts/<feature_name>.md`
-2. implement tests first 
+2. **Implement tests first** - Read `CLAUDE_TESTS.md` for patterns and best practices
 3. implement the feature - carefully decide to create DRY modules. In doubt, read file `CLAUDE_BBS.md` - do not over-engineer. BUT CREATE REUSABLE COMPONENTS. BBS style.
 4. You may read the current last log entries by something like:
    file server.log # that you may read with:
@@ -253,10 +254,27 @@ MCP servers are launched automatically by the agent on first use.
 
 ### Testing Best Practices
 
-- **Unit tests**: Test individual functions/methods
-- **Integration tests**: Test MCP servers, API calls (mark with `@pytest.mark.integration`)
-- **Async tests**: Use `@pytest.mark.asyncio` for async functions
-- **Fixtures**: Reuse setup via `tests/conftest.py`
+**CRITICAL: Always consult [CLAUDE_TESTS.md](CLAUDE_TESTS.md) before writing or modifying tests.**
+
+This project has comprehensive testing documentation covering:
+- Test organization and structure (unit, integration, E2E)
+- Fixtures and test isolation patterns
+- Parallel testing with pytest-xdist
+- Playwright E2E test patterns
+- Mock patterns (MockAgentClient)
+- Async testing configuration
+- Critical rules to avoid breaking tests
+
+Quick reference:
+- **Unit tests**: Fast, isolated, use MockAgentClient
+- **Integration tests**: Mark with `@pytest.mark.integration` (require API keys)
+- **E2E tests**: Mark with `@pytest.mark.e2e` + `@pytest.mark.xdist_group(name="e2e_server")`
+- **Async tests**: Auto-detected (or use `@pytest.mark.asyncio`)
+- **Fixtures**: Automatic isolation via `test_environment` (V1) and shared resources via `conftest.py`
+
+**Before committing**: Run `./check.sh` to ensure all tests pass.
+
+See [CLAUDE_TESTS.md](CLAUDE_TESTS.md) for complete patterns, examples, and troubleshooting.
 
 ## Critical Configuration Files
 

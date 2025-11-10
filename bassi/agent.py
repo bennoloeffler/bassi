@@ -33,6 +33,7 @@ from bassi.shared.mcp_registry import (
     create_sdk_mcp_servers,
     load_external_mcp_servers,
 )
+from bassi.shared.permission_config import get_permission_mode
 
 # Logging configured by entry point (main.py or cli.py)
 logger = logging.getLogger(__name__)
@@ -261,10 +262,13 @@ Available operations:
             "🔓 Dynamic tool discovery enabled - all MCP tools allowed"
         )
 
+        permission_mode = get_permission_mode()
+        logger.info(f"🔐 Permission mode: {permission_mode}")
+
         self.session_config = SessionConfig(
             allowed_tools=None,
             system_prompt=self.SYSTEM_PROMPT,
-            permission_mode="bypassPermissions",
+            permission_mode=permission_mode,
             mcp_servers=all_mcp_servers,
             resume_session_id=resume_session_id,
             include_partial_messages=True,

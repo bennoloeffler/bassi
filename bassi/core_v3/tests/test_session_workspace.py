@@ -2,7 +2,9 @@
 Unit tests for SessionWorkspace class.
 """
 
+import asyncio
 import json
+import re
 from io import BytesIO
 
 import pytest
@@ -127,6 +129,28 @@ class TestFileUpload:
         assert temp_workspace.metadata["file_count"] == 1
 
     @pytest.mark.asyncio
+    async def test_deduplicate_cleans_temp_files(
+        self, temp_workspace, mock_upload_file
+    ):
+        """Should remove temporary upload artifacts after deduplication."""
+        content = b"Same content for dedup"
+
+        first = mock_upload_file("first.txt", content)
+        await temp_workspace.upload_file(first)
+
+        duplicate = mock_upload_file("duplicate.txt", content)
+        await temp_workspace.upload_file(duplicate)
+
+        data_dir = temp_workspace.physical_path / "DATA_FROM_USER"
+        temp_files = [
+            path
+            for path in data_dir.iterdir()
+            if path.is_file() and path.name.startswith(".tmp_")
+        ]
+
+        assert temp_files == []
+
+    @pytest.mark.asyncio
     async def test_handles_large_files_with_streaming(
         self, temp_workspace, mock_upload_file
     ):
@@ -164,6 +188,32 @@ class TestFileUpload:
 
         assert temp_workspace.metadata["file_count"] == initial_count + 1
 
+    @pytest.mark.asyncio
+    async def test_concurrent_uploads_are_serialized(
+        self, temp_workspace, mock_upload_file
+    ):
+        """Should handle concurrent uploads without clobbering metadata."""
+
+        async def upload(idx: int):
+            upload_file = mock_upload_file(
+                f"parallel_{idx}.txt", f"content-{idx}".encode()
+            )
+            return await temp_workspace.upload_file(upload_file)
+
+        results = await asyncio.gather(
+            *(upload(i) for i in range(5)), return_exceptions=False
+        )
+
+        assert len(results) == 5
+        assert len({path.name for path in results}) == 5
+        assert temp_workspace.metadata["file_count"] == 5
+
+        data_dir = temp_workspace.physical_path / "DATA_FROM_USER"
+        created_files = [
+            path for path in data_dir.iterdir() if path.is_file()
+        ]
+        assert len(created_files) == 5
+
 
 class TestFileManagement:
     """Test file listing and management."""
@@ -191,6 +241,19 @@ class TestFileManagement:
         """Should return empty list if no files uploaded."""
         files = temp_workspace.list_files()
         assert files == []
+
+    def test_list_files_skips_directories(self, temp_workspace):
+        """Should not include directories when listing files."""
+        data_dir = temp_workspace.physical_path / "DATA_FROM_USER"
+        (data_dir / "keep.txt").write_text("ok", encoding="utf-8")
+        (data_dir / "nested").mkdir()
+        (data_dir / "nested" / "ignored.txt").write_text(
+            "ignore", encoding="utf-8"
+        )
+
+        files = temp_workspace.list_files()
+
+        assert [entry["name"] for entry in files] == ["keep.txt"]
 
 
 class TestMessageHistory:
@@ -250,6 +313,36 @@ class TestDisplayName:
             metadata = json.load(f)
 
         assert metadata["display_name"] == new_name
+
+    def test_update_display_name_keeps_symlink_synced(
+        self, tmp_path, monkeypatch
+    ):
+        """Should update symlink path and metadata together across renames."""
+        monkeypatch.chdir(tmp_path)
+        workspace = SessionWorkspace("sync-session", base_path=tmp_path)
+
+        initial_symlink = workspace.metadata["symlink_name"]
+        assert (
+            workspace.SYMLINK_DIR / initial_symlink
+        ).exists(), "Initial symlink missing"
+
+        workspace.update_display_name("First Rename")
+        first_symlink = workspace.metadata["symlink_name"]
+        assert (
+            workspace.SYMLINK_DIR / first_symlink
+        ).exists(), "First rename symlink missing"
+        assert not (
+            workspace.SYMLINK_DIR / initial_symlink
+        ).exists(), "Old symlink should be removed"
+
+        workspace.update_display_name("Second Rename")
+        second_symlink = workspace.metadata["symlink_name"]
+        assert (
+            workspace.SYMLINK_DIR / second_symlink
+        ).exists(), "Second rename symlink missing"
+        assert not (
+            workspace.SYMLINK_DIR / first_symlink
+        ).exists(), "First rename symlink should be removed"
 
 
 class TestSessionState:
@@ -367,6 +460,18 @@ class TestWorkspaceContext:
         assert "## Available Files" in context
         assert "test_" in context  # File will have hash in name
 
+    @pytest.mark.asyncio
+    async def test_workspace_context_includes_file_sizes(
+        self, temp_workspace, mock_upload_file
+    ):
+        """Should show file size in KB for uploaded files."""
+        file = mock_upload_file("data.csv", b"x" * 2048)  # 2 KB
+        await temp_workspace.upload_file(file)
+
+        context = temp_workspace.get_workspace_context()
+
+        assert "(2.0 KB)" in context
+
     def test_workspace_context_shows_no_files_message(self, temp_workspace):
         """Should show message when no files are uploaded."""
         context = temp_workspace.get_workspace_context()
@@ -399,3 +504,164 @@ class TestWorkspaceContext:
         """Should raise error for invalid category."""
         with pytest.raises(ValueError, match="Invalid category"):
             temp_workspace.get_output_path("invalid", "file.txt")
+
+
+class TestSymlinkEdgeCases:
+    """Test edge cases in symlink management."""
+
+    def test_empty_sanitized_name_fallback(self, tmp_path):
+        """Should use 'unnamed-session' when sanitized name is empty."""
+        session_id = "test-session-456"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        # Update symlink with name that sanitizes to empty (special chars only)
+        workspace.update_symlink("!!!")
+
+        # Check that "unnamed-session" was used
+        symlink_name = workspace.metadata["symlink_name"]
+        assert "unnamed-session" in symlink_name
+
+    def test_symlink_safety_limit_exceeded(self, tmp_path, monkeypatch):
+        """Should raise error when symlink collision exceeds 100 attempts."""
+        import os
+
+        session_id = "test-session-789"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        # Mock os.symlink to always raise FileExistsError
+        original_symlink = os.symlink
+
+        def mock_symlink(src, dst):
+            # Simulate persistent collision
+            raise FileExistsError(f"Symlink exists: {dst}")
+
+        monkeypatch.setattr(os, "symlink", mock_symlink)
+
+        # Should raise ValueError after 100+ attempts
+        with pytest.raises(
+            ValueError, match="Could not create unique symlink"
+        ):
+            workspace.update_symlink("test-name")
+
+    def test_symlink_name_truncates_long_titles(self, tmp_path):
+        """Should truncate sanitized portion of symlink to 50 characters."""
+        session_id = "test-session-long-name"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        long_name = "VeryLongSessionNameWithManyCharacters_" * 3
+        workspace.update_symlink(long_name)
+
+        symlink_name = workspace.metadata["symlink_name"]
+        parts = symlink_name.split("__")
+
+        assert len(parts) >= 3  # timestamp, clean name, short id
+        clean_name = parts[1]
+        expected = long_name.lower().replace(" ", "-").replace("_", "-")
+        expected = re.sub(r"[^a-z0-9-]", "", expected)
+        expected = re.sub(r"-+", "-", expected).strip("-")[:50]
+
+        assert len(clean_name) == 50
+        assert clean_name == expected
+
+
+class TestFileListingEdgeCases:
+    """Test edge cases in file listing."""
+
+    def test_list_files_when_directory_deleted(self, tmp_path):
+        """Should return empty list when DATA_FROM_USER directory is deleted."""
+        import shutil
+
+        session_id = "test-session-999"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        # Delete DATA_FROM_USER directory
+        data_dir = workspace.physical_path / "DATA_FROM_USER"
+        shutil.rmtree(data_dir)
+
+        # Should return empty list without raising error
+        files = workspace.list_files()
+        assert files == []
+
+
+class TestSymlinkRetryPath:
+    """Test symlink collision retry success path."""
+
+    def test_symlink_collision_retry_succeeds(self, tmp_path, monkeypatch):
+        """Should succeed on retry when first attempt collides."""
+        import os
+
+        session_id = "test-session-retry"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        original_symlink = os.symlink
+        call_count = [0]
+
+        def mock_symlink_fail_once(src, dst):
+            """Fail on first call, succeed on second."""
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call fails (simulate collision)
+                raise FileExistsError(f"Symlink exists: {dst}")
+            else:
+                # Second call succeeds
+                return original_symlink(src, dst)
+
+        monkeypatch.setattr(os, "symlink", mock_symlink_fail_once)
+
+        # Should succeed on retry
+        workspace.update_symlink("collision-test")
+        assert "collision-test" in workspace.metadata["symlink_name"]
+
+
+class TestSymlinkRemoval:
+    """Test symlink removal edge cases."""
+
+    def test_remove_nonexistent_symlink(self, tmp_path):
+        """Should handle FileNotFoundError gracefully when symlink doesn't exist."""
+        session_id = "test-session-nolink"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        # Get the initial symlink name that was created
+        initial_symlink = workspace.metadata["symlink_name"]
+
+        # Delete the symlink file manually to simulate missing symlink
+        symlink_path = workspace.SYMLINK_DIR / initial_symlink
+        if symlink_path.exists():
+            symlink_path.unlink()
+
+        # Should not raise error when removing already-deleted symlink
+        workspace._remove_symlink()
+
+        # Test passes if no exception was raised
+        assert True
+
+
+class TestSessionDeletion:
+    """Test session deletion functionality."""
+
+    def test_delete_removes_session(self, tmp_path, monkeypatch):
+        """Should delete entire session directory and symlink."""
+        # Change to tmp_path so symlinks are created there
+        monkeypatch.chdir(tmp_path)
+
+        session_id = "test-session-delete"
+        workspace = SessionWorkspace(session_id, base_path=tmp_path)
+
+        # Create a symlink
+        workspace.update_symlink("to-be-deleted")
+
+        # Verify workspace exists
+        assert workspace.physical_path.exists()
+        symlink_path = (
+            workspace.SYMLINK_DIR / workspace.metadata["symlink_name"]
+        )
+        assert symlink_path.exists()
+
+        # Delete workspace
+        workspace.delete()
+
+        # Verify physical directory is deleted
+        assert not workspace.physical_path.exists()
+
+        # Verify symlink is removed
+        assert not symlink_path.exists()

@@ -81,9 +81,17 @@ class TestUseCase3BasicConversation:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_chat_streaming_response(self):
-        """Test basic conversation with streaming response"""
-        if not SDK_AVAILABLE or not os.getenv("ANTHROPIC_API_KEY"):
-            pytest.skip("Agent SDK or API key not available")
+        """Test basic conversation with streaming response (requires real API)"""
+        # Skip this test unless explicitly enabled with RUN_REAL_API_TESTS=1
+        # This test requires a real API key and makes actual API calls
+        if (
+            not SDK_AVAILABLE
+            or not os.getenv("ANTHROPIC_API_KEY")
+            or not os.getenv("RUN_REAL_API_TESTS")
+        ):
+            pytest.skip(
+                "Requires SDK, API key, and RUN_REAL_API_TESTS=1 to run real API tests"
+            )
 
         agent = BassiAgent()
 

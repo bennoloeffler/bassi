@@ -59,6 +59,9 @@
 
 html {
     scroll-behavior: smooth;
+    /* Better text rendering on mobile */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body {
@@ -66,10 +69,14 @@ body {
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
+    min-height: -webkit-fill-available; /* iOS Safari fix */
     display: flex;
     flex-direction: column;
     line-height: 1.6;
     overflow-x: hidden;
+    /* Safe area for notched devices */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 /* ========== Layout ========== */
@@ -1781,12 +1788,14 @@ body.hide-thinking .thinking-block {
 }
 
 .session-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
     padding: var(--spacing-md);
     background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: 8px;
     margin-bottom: var(--spacing-sm);
-    cursor: pointer;
     transition: all var(--transition-fast);
 }
 
@@ -1800,6 +1809,38 @@ body.hide-thinking .thinking-block {
     background: rgba(88, 166, 255, 0.15);
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.session-item-content {
+    flex: 1;
+    cursor: pointer;
+    min-width: 0; /* Allow text truncation */
+}
+
+.session-item-delete {
+    opacity: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: var(--spacing-sm);
+    border-radius: 4px;
+    transition: opacity 0.2s, background 0.2s, transform 0.1s;
+    flex-shrink: 0;
+}
+
+.session-item:hover .session-item-delete {
+    opacity: 1;
+}
+
+.session-item-delete:hover {
+    opacity: 1 !important;
+    background: rgba(255, 0, 0, 0.1);
+    transform: scale(1.2);
+}
+
+.session-item-delete:active {
+    transform: scale(1.1);
 }
 
 .session-item-name {
@@ -1946,7 +1987,10 @@ body.hide-thinking .thinking-block {
     background: var(--bg-overlay);
     border-top: 1px solid var(--border);
     padding: var(--spacing-lg);
+    padding-bottom: calc(var(--spacing-lg) + env(safe-area-inset-bottom));
     backdrop-filter: blur(10px);
+    /* Prevent keyboard from covering input on mobile */
+    z-index: 50;
 }
 
 /* Image preview container */
@@ -2117,6 +2161,7 @@ body.hide-thinking .thinking-block {
 
 /* ========== Responsive Design ========== */
 
+/* Tablet and below */
 @media (max-width: 768px) {
     .header-content {
         flex-direction: column;
@@ -2127,28 +2172,201 @@ body.hide-thinking .thinking-block {
     .header-controls {
         width: 100%;
         justify-content: space-between;
+        flex-wrap: wrap;
     }
 
     #conversation {
         padding: var(--spacing-md);
+        padding-bottom: 160px; /* Extra space for input area on mobile */
     }
 
     .input-container {
-        padding: var(--spacing-md);
+        padding: var(--spacing-sm) var(--spacing-md);
     }
 
     .input-wrapper {
-        flex-direction: column;
-        align-items: stretch;
+        max-width: 100%;
+    }
+
+    /* Make input area more mobile-friendly */
+    .input-area {
+        gap: var(--spacing-sm);
+    }
+
+    #message-input {
+        font-size: 16px; /* Prevents zoom on iOS */
+        padding: 12px 14px;
+        min-height: 44px; /* Touch-friendly minimum */
+    }
+
+    /* Button group stays in row, aligned to bottom, grows with textarea */
+    .button-group {
+        display: flex;
+        flex-direction: row;
+        gap: var(--spacing-sm);
+        align-items: flex-end;
+        align-self: flex-end;
+    }
+
+    #upload-button {
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+        font-size: 1.3rem;
+        flex-shrink: 0;
     }
 
     #send-button {
-        width: 100%;
+        min-height: 44px;
+        padding: 10px 18px;
+        font-size: 0.95rem;
+        flex-shrink: 0;
+    }
+
+    #stop-button {
+        min-height: 44px;
+        padding: 10px 18px;
+        flex-shrink: 0;
     }
 
     .welcome-features {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    /* Compact header on mobile */
+    .title {
+        font-size: 1.3rem;
+    }
+
+    .version {
+        font-size: 0.7rem;
+        padding: 3px 6px;
+    }
+
+    /* Modal adjustments for mobile */
+    .modal-content {
+        width: 95%;
+        max-height: 90vh;
+        margin: var(--spacing-md);
+    }
+
+    /* Session sidebar takes full width on mobile */
+    .session-sidebar {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+/* Mobile phones */
+@media (max-width: 480px) {
+    .header {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+
+    .header-content {
+        gap: var(--spacing-sm);
+    }
+
+    .title {
+        font-size: 1.2rem;
+    }
+
+    .header-controls {
+        gap: var(--spacing-sm);
+    }
+
+    .verbose-selector {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .verbose-selector label {
+        font-size: 0.75rem;
+    }
+
+    .verbose-selector select {
+        font-size: 0.8rem;
+        padding: 4px 8px;
+    }
+
+    #conversation {
+        padding: var(--spacing-sm);
+        padding-bottom: 180px;
+    }
+
+    .input-container {
+        padding: var(--spacing-sm);
+    }
+
+    #message-input {
+        font-size: 16px;
+        padding: 10px 12px;
+    }
+
+    #upload-button {
+        width: 40px;
+        height: 40px;
+        min-height: 40px;
+        font-size: 1.2rem;
+    }
+
+    #send-button {
+        padding: 9px 14px;
+        font-size: 0.9rem;
+        min-height: 40px;
+    }
+
+    #stop-button {
+        padding: 9px 14px;
+        min-height: 40px;
+    }
+
+    /* Smaller status indicator on tiny screens */
+    .server-status {
+        font-size: 0.8rem;
+        padding: 8px 16px;
+    }
+
+    .connection-status {
+        font-size: 0.8rem;
+        padding: 4px 8px;
+    }
+}
+
+/* Landscape phones - optimize for horizontal layout */
+@media (max-width: 768px) and (orientation: landscape) {
+    #conversation {
+        padding-bottom: 140px;
+    }
+
+    .header {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+
+    .input-container {
+        padding: var(--spacing-sm) var(--spacing-md);
+        padding-bottom: calc(var(--spacing-sm) + env(safe-area-inset-bottom));
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    /* Better touch targets */
+    button, a, input, textarea {
+        -webkit-tap-highlight-color: rgba(88, 166, 255, 0.2);
+    }
+
+    /* Smoother scrolling on touch devices */
+    #conversation {
+        -webkit-overflow-scrolling: touch;
+        overflow-scrolling: touch;
+    }
+
+    /* Prevent double-tap zoom on buttons */
+    button {
+        touch-action: manipulation;
     }
 }
 
@@ -3275,6 +3493,8 @@ details[open] .tools-grid {
 .button-group {
     display: flex;
     gap: var(--spacing-sm);
+    align-items: flex-end;
+    flex-shrink: 0;
 }
 
 /* Upload Button (Modern Circular Design) */

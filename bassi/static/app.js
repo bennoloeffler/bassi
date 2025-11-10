@@ -222,22 +222,22 @@ class BassiWebClient {
 
         // Convert session files to staged files format
         const sessionStagedFiles = this.sessionFiles.map(file => ({
-            name: file.name,
+            filename: file.name,  // Use 'filename' to match addFileToStaging() format
             size: file.size,
             uploadedPath: file.path,
             isSessionFile: true  // Mark as already persisted
         }))
 
         // Merge with currently staged files (avoid duplicates by name)
-        const existingNames = new Set(this.stagedFiles.map(f => f.name))
+        const existingNames = new Set(this.stagedFiles.map(f => f.filename))
         for (const sessionFile of sessionStagedFiles) {
-            if (!existingNames.has(sessionFile.name)) {
+            if (!existingNames.has(sessionFile.filename)) {
                 this.stagedFiles.push(sessionFile)
             }
         }
 
         // Update UI
-        this.updateFileChipsDisplay()
+        this.renderFileChips()
         this.renderFileList()
     }
 
@@ -932,8 +932,7 @@ class BassiWebClient {
         const uploadResult = await this.uploadFile(file)
         if (!uploadResult) return
 
-        // Add to file chips (new system)
-        await this.addFileToStaging(file, uploadResult)
+        // File chips are updated automatically by loadSessionFiles() in uploadFile()
     }
 
 
@@ -1075,8 +1074,7 @@ class BassiWebClient {
         const uploadResult = await this.uploadFile(file)
         if (!uploadResult) return
 
-        // Add to file chips (new system)
-        await this.addFileToStaging(file, uploadResult)
+        // File chips are updated automatically by loadSessionFiles() in uploadFile()
     }
 
     async addDocumentToMessage(file) {
@@ -1090,8 +1088,7 @@ class BassiWebClient {
         const uploadResult = await this.uploadFile(file)
         if (!uploadResult) return
 
-        // Add to file chips (new system)
-        await this.addFileToStaging(file, uploadResult)
+        // File chips are updated automatically by loadSessionFiles() in uploadFile()
     }
 
     async handleFileSelect(event) {
@@ -1677,11 +1674,16 @@ class BassiWebClient {
                 // Load any existing session files (for resumed sessions)
                 this.loadSessionFiles()
 
-                // Clear any old messages from previous session
-                this.conversationEl.innerHTML = ''
-                console.log('🔷 [FRONTEND] Calling showWelcomeMessage()...')
-                this.showWelcomeMessage()
-                console.log('🔷 [FRONTEND] showWelcomeMessage() completed')
+                // Only clear and show welcome if conversation is empty
+                // (If switching sessions, conversation already has loaded history)
+                const hasMessages = this.conversationEl.children.length > 0
+                if (!hasMessages) {
+                    console.log('🔷 [FRONTEND] New session - showing welcome message')
+                    this.conversationEl.innerHTML = ''
+                    this.showWelcomeMessage()
+                } else {
+                    console.log(`🔷 [FRONTEND] Session has ${this.conversationEl.children.length} messages - keeping history`)
+                }
 
                 // Hide loading status - agent is ready
                 this.hideServerStatus()
@@ -3448,10 +3450,19 @@ class BassiWebClient {
 
                 html += `
                     <div class="session-item ${isActive ? 'active' : ''}"
-                         data-session-id="${session.session_id}"
-                         onclick="window.bassiClient.switchSession('${session.session_id}')">
-                        <div class="session-item-name">${this.escapeHtml(session.display_name || 'Unnamed Session')}</div>
-                        <div class="session-item-meta">${messageCount} message${messageCount !== 1 ? 's' : ''} • ${lastActivity}</div>
+                         data-session-id="${session.session_id}">
+                        <div class="session-item-content"
+                             onclick="window.bassiClient.switchSession('${session.session_id}')">
+                            <div class="session-item-name">${this.escapeHtml(session.display_name || 'Unnamed Session')}</div>
+                            <div class="session-item-meta">${messageCount} message${messageCount !== 1 ? 's' : ''} • ${lastActivity}</div>
+                        </div>
+                        ${!isActive ? `
+                            <button class="session-item-delete"
+                                    onclick="event.stopPropagation(); window.bassiClient.deleteSession('${session.session_id}')"
+                                    title="Delete session">
+                                🗑️
+                            </button>
+                        ` : ''}
                     </div>
                 `
             })
@@ -3486,10 +3497,27 @@ class BassiWebClient {
     async switchSession(sessionId) {
         /**
          * Switch to a different session by reconnecting WebSocket.
+         *
+         * 🔄 PHASE 4: Session Switch Confirmation
+         * Shows warning if user has unsent input to prevent accidental data loss.
          */
+        console.log(`🔷 [FRONTEND] switchSession() called with sessionId: ${sessionId}`)
         if (sessionId === this.sessionId) {
             console.log('⚠️ Already in this session')
             return
+        }
+
+        // 🔄 PHASE 4: Confirm if current session has unsent input
+        const inputValue = this.messageInput.value.trim()
+        if (inputValue.length > 0) {
+            const confirmed = window.confirm(
+                'You have unsent input. Switch sessions anyway?\n\n' +
+                'Your typed message will be lost.'
+            )
+            if (!confirmed) {
+                console.log('⚠️ Session switch cancelled - user has unsent input')
+                return
+            }
         }
 
         console.log(`🔄 Switching to session: ${sessionId}`)
@@ -3499,20 +3527,140 @@ class BassiWebClient {
             this.ws.close()
         }
 
-        // Clear current state
-        this.conversationEl.innerHTML = ''
+        // Clear current state (but NOT conversation - we'll load messages first)
         this.blocks.clear()
         this.textBuffers.clear()
         this.sessionFiles = []
         this.stagedFiles = []
+        this.messageInput.value = ''  // Clear input field
 
-        // Connect with new session ID
+        // Set new session ID BEFORE connecting
         this.sessionId = sessionId
+
+        // Clear conversation NOW, just before loading
+        this.conversationEl.innerHTML = ''
+
+        // Load message history FIRST (before connecting)
+        await this.loadSessionHistory(sessionId)
+
+        // THEN connect with new session ID
         this.connect()
 
         // Close sidebar on mobile
         if (window.innerWidth <= 768) {
             this.toggleSessionSidebar()
+        }
+    }
+
+    async loadSessionHistory(sessionId) {
+        /**
+         * Load and display message history from a session.
+         *
+         * Fetches messages from /api/sessions/{id}/messages and renders them.
+         */
+        console.log(`🔷 [FRONTEND] loadSessionHistory() called for session: ${sessionId}`)
+        try {
+            console.log(`📚 Loading message history for session: ${sessionId}`)
+
+            const response = await fetch(`/api/sessions/${sessionId}/messages`)
+
+            if (!response.ok) {
+                console.error('❌ Failed to load message history:', response.status)
+                return
+            }
+
+            const data = await response.json()
+            const messages = data.messages || []
+
+            console.log(`📝 Loaded ${messages.length} messages from history`)
+
+            // Render each message
+            for (const msg of messages) {
+                if (msg.role === 'user') {
+                    this.renderUserMessage(msg.content)
+                } else if (msg.role === 'assistant') {
+                    this.renderAssistantMessage(msg.content)
+                }
+            }
+
+            // Scroll to bottom after loading all messages
+            this.scrollToBottom()
+
+        } catch (error) {
+            console.error('❌ Error loading message history:', error)
+        }
+    }
+
+    renderUserMessage(content) {
+        /**
+         * Render a user message in the conversation.
+         */
+        const messageDiv = document.createElement('div')
+        messageDiv.className = 'message user-message'
+
+        const contentDiv = document.createElement('div')
+        contentDiv.className = 'message-content'
+        contentDiv.textContent = content
+
+        messageDiv.appendChild(contentDiv)
+        this.conversationEl.appendChild(messageDiv)
+    }
+
+    renderAssistantMessage(content) {
+        /**
+         * Render an assistant message in the conversation.
+         */
+        const messageDiv = document.createElement('div')
+        messageDiv.className = 'message assistant-message'
+
+        const contentDiv = document.createElement('div')
+        contentDiv.className = 'message-content'
+
+        // Render markdown if marked is available
+        if (this.markdownRenderer) {
+            contentDiv.innerHTML = this.markdownRenderer.parse(content)
+        } else {
+            contentDiv.textContent = content
+        }
+
+        messageDiv.appendChild(contentDiv)
+        this.conversationEl.appendChild(messageDiv)
+    }
+
+    async deleteSession(sessionId) {
+        /**
+         * Delete a session with confirmation.
+         *
+         * Shows a confirmation dialog before deleting.
+         * Reloads session list after successful deletion.
+         */
+        const session = this.allSessions.find(s => s.session_id === sessionId)
+        const sessionName = session?.display_name || 'Unnamed Session'
+
+        // Show confirmation dialog
+        if (!confirm(`Delete "${sessionName}"?\n\nThis will permanently delete all messages and files.`)) {
+            return
+        }
+
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}`, {
+                method: 'DELETE'
+            })
+
+            if (!response.ok) {
+                const error = await response.json()
+                alert(`Failed to delete session: ${error.error}`)
+                return
+            }
+
+            console.log(`🗑️  Deleted session: ${sessionId}`)
+
+            // Reload session list
+            await this.loadSessions()
+
+        } catch (error) {
+            console.error('❌ Error deleting session:', error)
+            alert('Failed to delete session')
         }
     }
 

@@ -177,6 +177,40 @@ class BassiAgentSession:
         self._connected = False
         self.client = None
 
+    def restore_conversation_history(self, history: list[dict]) -> None:
+        """
+        Restore conversation history from workspace.
+
+        Args:
+            history: List of message dicts with role, content, timestamp
+                     Format: [{"role": "user", "content": "...", "timestamp": "..."}]
+
+        This method converts workspace history to SDK Message objects and
+        populates the session's message_history list.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        logger.info(
+            f"🔷 [SESSION] Restoring {len(history)} messages from workspace"
+        )
+
+        for msg in history:
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "user":
+                self.message_history.append(UserMessage(content=content))
+            elif role == "assistant":
+                self.message_history.append(AssistantMessage(content=content))
+            else:
+                logger.warning(f"⚠️ Unknown message role: {role}, skipping")
+
+        logger.info(
+            f"✅ [SESSION] Restored {len(self.message_history)} messages to SDK context"
+        )
+
     async def update_thinking_mode(self, thinking_mode: bool):
         """
         Update thinking mode and reconnect with new model.
@@ -343,11 +377,17 @@ class BassiAgentSession:
 
     def _update_stats_from_result(self, message: ResultMessage):
         """Update statistics from result message"""
-        if hasattr(message, "input_tokens"):
-            self.stats.total_input_tokens += message.input_tokens
-        if hasattr(message, "output_tokens"):
-            self.stats.total_output_tokens += message.output_tokens
-        if hasattr(message, "total_cost_usd"):
+        # Extract tokens from usage dict
+        if message.usage:
+            input_tokens = message.usage.get("input_tokens")
+            output_tokens = message.usage.get("output_tokens")
+            if input_tokens is not None:
+                self.stats.total_input_tokens += input_tokens
+            if output_tokens is not None:
+                self.stats.total_output_tokens += output_tokens
+
+        # Add cost if available
+        if message.total_cost_usd is not None:
             self.stats.total_cost_usd += message.total_cost_usd
 
     def get_stats(self) -> dict[str, Any]:

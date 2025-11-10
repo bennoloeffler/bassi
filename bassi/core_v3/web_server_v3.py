@@ -42,6 +42,7 @@ from bassi.core_v3.upload_service import (
     UploadService,
 )
 from bassi.shared.mcp_registry import create_mcp_registry
+from bassi.shared.permission_config import get_permission_mode
 from bassi.shared.sdk_loader import create_sdk_mcp_server
 from bassi.shared.sdk_types import SystemMessage, ToolResultBlock, UserMessage
 
@@ -441,6 +442,69 @@ class WebUIServerV3:
                     status_code=500,
                 )
 
+        # 🗑️ PHASE 2.2: Session deletion endpoint
+        @self.app.delete("/api/sessions/{session_id}")
+        async def delete_session(session_id: str):
+            """
+            Delete a session and all its data.
+
+            Args:
+                session_id: Session ID to delete
+
+            Returns:
+                JSON with success status
+
+            Raises:
+                400: Cannot delete active session
+                404: Session not found
+                500: Deletion failed
+            """
+            try:
+                # Don't allow deleting active session
+                if session_id in self.active_sessions:
+                    logger.warning(
+                        f"❌ Cannot delete active session: {session_id[:8]}..."
+                    )
+                    return JSONResponse(
+                        {"error": "Cannot delete active session"},
+                        status_code=400,
+                    )
+
+                # Check if session exists
+                if not SessionWorkspace.exists(session_id):
+                    logger.warning(
+                        f"❌ Session not found: {session_id[:8]}..."
+                    )
+                    return JSONResponse(
+                        {"error": "Session not found"},
+                        status_code=404,
+                    )
+
+                # Load workspace to delete
+                workspace = SessionWorkspace.load(session_id)
+
+                # Remove from index first
+                self.session_index.remove_session(session_id)
+
+                # Delete workspace (removes files + symlink)
+                workspace.delete()
+
+                logger.info(f"🗑️  Deleted session: {session_id[:8]}...")
+
+                return JSONResponse(
+                    {"success": True, "session_id": session_id}
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to delete session {session_id}: {e}",
+                    exc_info=True,
+                )
+                return JSONResponse(
+                    {"error": f"Failed to delete session: {str(e)}"},
+                    status_code=500,
+                )
+
         # Session files listing endpoint
         @self.app.get("/api/sessions/{session_id}/files")
         async def list_session_files(session_id: str):
@@ -488,6 +552,85 @@ class WebUIServerV3:
                     status_code=500,
                 )
 
+        # Session messages endpoint
+        @self.app.get("/api/sessions/{session_id}/messages")
+        async def get_session_messages(session_id: str):
+            """
+            Load message history from history.md file.
+
+            Args:
+                session_id: Session ID to load messages for
+
+            Returns:
+                JSON with list of messages [{role, content, timestamp}]
+            """
+            try:
+                # Check if session exists
+                if not SessionWorkspace.exists(session_id):
+                    return JSONResponse(
+                        {"error": f"Session not found: {session_id}"},
+                        status_code=404,
+                    )
+
+                # Load workspace
+                workspace = self.workspaces.get(session_id)
+                if not workspace:
+                    workspace = SessionWorkspace.load(session_id)
+
+                # Read history.md file
+                history_path = workspace.physical_path / "history.md"
+                if not history_path.exists():
+                    return JSONResponse({"messages": []})
+
+                # Parse history.md
+                messages = []
+                current_message = None
+
+                with open(history_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.rstrip()
+
+                        # Skip title line
+                        if line.startswith("# Chat History:"):
+                            continue
+
+                        # Parse message header: ## Role - Timestamp
+                        if line.startswith("## "):
+                            # Save previous message if exists
+                            if current_message and current_message["content"].strip():
+                                messages.append(current_message)
+
+                            # Parse new message header
+                            parts = line[3:].split(" - ", 1)
+                            if len(parts) == 2:
+                                role, timestamp = parts
+                                current_message = {
+                                    "role": role.strip().lower(),
+                                    "content": "",
+                                    "timestamp": timestamp.strip(),
+                                }
+                        # Accumulate content lines
+                        elif current_message is not None:
+                            if current_message["content"]:
+                                current_message["content"] += "\n"
+                            current_message["content"] += line
+
+                # Don't forget the last message
+                if current_message and current_message["content"].strip():
+                    messages.append(current_message)
+
+                return JSONResponse({"messages": messages})
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to load messages for session {session_id}: {e}",
+                    exc_info=True,
+                )
+                return JSONResponse(
+                    {"error": f"Failed to load messages: {str(e)}"},
+                    status_code=500,
+                )
+
         # WebSocket endpoint
         @self.app.websocket("/ws")
         async def websocket_endpoint(
@@ -510,11 +653,9 @@ class WebUIServerV3:
             requested_session_id
         ):
             connection_id = requested_session_id
-            is_resuming = True
             logger.info(f"🔷 [WS] Resuming session: {connection_id[:8]}...")
         else:
             connection_id = str(uuid.uuid4())
-            is_resuming = False
             logger.info(
                 f"🔷 [WS] Generated new connection ID: {connection_id[:8]}..."
             )
@@ -546,6 +687,22 @@ class WebUIServerV3:
         session = self.session_factory(question_service, workspace)
         self.active_sessions[connection_id] = session
         logger.info(f"🔷 [WS] Agent session created: {type(session)}")
+
+        # CRITICAL FIX: Restore conversation history for existing sessions
+        if requested_session_id and SessionWorkspace.exists(
+            requested_session_id
+        ):
+            logger.info(
+                "🔷 [WS] Loading conversation history from workspace..."
+            )
+            history = workspace.load_conversation_history()
+            if history:
+                session.restore_conversation_history(history)
+                logger.info(
+                    f"✅ [WS] Restored {len(history)} messages to SDK context"
+                )
+            else:
+                logger.info("ℹ️ [WS] No conversation history to restore")
 
         logger.info("🔷 [WS] Accepting WebSocket connection...")
         await websocket.accept()
@@ -626,6 +783,19 @@ class WebUIServerV3:
                 question_service = self.question_services[connection_id]
                 question_service.cancel_all()
                 del self.question_services[connection_id]
+
+            # 🧹 PHASE 3: Auto-cleanup empty sessions
+            # Delete session if no messages were exchanged
+            workspace = self.workspaces.get(connection_id)
+            if workspace and workspace.metadata.get("message_count", 0) == 0:
+                logger.info(
+                    f"🧹 Deleting empty session: {connection_id[:8]}..."
+                )
+                try:
+                    self.session_index.remove_session(connection_id)
+                    workspace.delete()
+                except Exception as e:
+                    logger.error(f"Failed to cleanup empty session: {e}")
 
             # Clean up session
             if connection_id in self.active_sessions:
@@ -988,6 +1158,16 @@ class WebUIServerV3:
                 ""  # Will accumulate from text_delta events
             )
 
+            # 💾 PHASE 1.1: Save user message to workspace
+            workspace = session.workspace
+            workspace.save_message("user", user_message_text)
+            logger.info(
+                f"💾 Saved user message (count: {workspace.metadata['message_count']})"
+            )
+
+            # Update session index with new message count
+            self.session_index.update_session(workspace)
+
             print("🔄 Starting query...", flush=True)
 
             try:
@@ -1052,7 +1232,7 @@ class WebUIServerV3:
                             event["id"] = current_text_block_id
 
                             # Accumulate assistant response for auto-naming
-                            delta_text = event.get("delta", "")
+                            delta_text = event.get("text", "")
                             assistant_response_text += delta_text
 
                         elif event_type == "tool_start":
@@ -1165,8 +1345,22 @@ class WebUIServerV3:
                 await websocket.send_json({"type": "message_complete"})
                 logger.info("✅ Query completed, sent message_complete")
 
-                # 🏷️  Auto-naming: Generate session name after first exchange
+                # 💾 PHASE 1.2: Save assistant response to workspace
                 workspace = session.workspace
+                if assistant_response_text.strip():
+                    workspace.save_message(
+                        "assistant", assistant_response_text
+                    )
+                    logger.info(
+                        f"💾 Saved assistant response (count: {workspace.metadata['message_count']})"
+                    )
+
+                    # Update session index with new message count
+                    self.session_index.update_session(workspace)
+                else:
+                    logger.warning("⚠️  No assistant response text to save")
+
+                # 🏷️  Auto-naming: Generate session name after first exchange
                 message_count = workspace.metadata.get("message_count", 0)
                 current_state = workspace.state
 
@@ -1191,7 +1385,7 @@ class WebUIServerV3:
                         workspace.update_state("AUTO_NAMED")
 
                         # Update session index
-                        await self._update_session_index(workspace)
+                        self.session_index.update_session(workspace)
 
                         logger.info(
                             f"✅ Session auto-named: {generated_name}"
@@ -1633,19 +1827,25 @@ def create_default_session_factory() -> (
         # Generate workspace context for agent awareness
         workspace_context = workspace.get_workspace_context()
 
+        permission_mode = get_permission_mode()
+        logger.info(f"🔐 Web session permission mode: {permission_mode}")
+
         config = SessionConfig(
             allowed_tools=[
                 "*"
             ],  # Allow ALL tools including MCP, Skills, SlashCommands
             system_prompt=workspace_context,  # Inject workspace awareness
-            permission_mode="bypassPermissions",  # Bypass all permission checks
+            permission_mode=permission_mode,
             mcp_servers=mcp_servers,
             setting_sources=[
                 "project",
                 "local",
             ],  # Enable skills from project and local
         )
-        return BassiAgentSession(config)
+        session = BassiAgentSession(config)
+        # Attach workspace to session for later access
+        session.workspace = workspace
+        return session
 
     return factory
 

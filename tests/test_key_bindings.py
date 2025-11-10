@@ -20,6 +20,12 @@ import sys
 import pexpect
 import pytest
 
+# Skip all PTY-based tests on macOS due to PTY permission issues
+pytestmark = pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="pexpect PTY tests not supported on macOS due to permission issues",
+)
+
 
 class TestKeyBindings:
     """Integration tests for keyboard bindings using PTY simulation"""

@@ -1,4 +1,6 @@
 # bassi - Benno's Personal Assistant
+MAYBE: Commandline...
+https://www.youtube.com/watch?v=aYAVSG4Ra40
 
 Personal assistant using Claude API. Executes bash commands, searches web, manages Microsoft 365 services, automates browser tasks, queries databases.
 

@@ -90,6 +90,20 @@ def test_agent_has_mcp_servers():
     del os.environ["ANTHROPIC_API_KEY"]
 
 
+def test_agent_permission_mode_from_env(monkeypatch):
+    """Agent should honor BASSI_PERMISSION_MODE env override."""
+    from bassi.agent import BassiAgent
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("BASSI_PERMISSION_MODE", "acceptEdits")
+    monkeypatch.setattr("bassi.agent.create_sdk_mcp_servers", lambda: {})
+    monkeypatch.setattr("bassi.agent.load_external_mcp_servers", lambda: {})
+
+    agent = BassiAgent(display_tools=False)
+
+    assert agent.session_config.permission_mode == "acceptEdits"
+
+
 def test_agent_reset():
     """Test conversation reset functionality"""
     import os

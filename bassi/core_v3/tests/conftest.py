@@ -5,8 +5,7 @@ Pytest fixtures for bassi.core_v3 tests.
 import asyncio
 import threading
 import time
-from contextlib import contextmanager
-from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -17,8 +16,6 @@ from bassi.core_v3.interactive_questions import InteractiveQuestionService
 from bassi.core_v3.session_workspace import SessionWorkspace
 from bassi.core_v3.tools import create_bassi_tools
 from bassi.core_v3.web_server_v3 import WebUIServerV3
-from bassi.shared.agent_protocol import AgentClientFactory
-from bassi.shared.mcp_registry import create_mcp_registry
 from bassi.shared.sdk_loader import create_sdk_mcp_server
 from tests.fixtures.mock_agent_client import MockAgentClient
 
@@ -29,9 +26,31 @@ def mock_agent_client() -> MockAgentClient:
     return MockAgentClient()
 
 
+class AutoRespondingMockAgentClient(MockAgentClient):
+    """
+    MockAgentClient that automatically generates simple text responses.
+
+    This enables E2E tests to work without manually queuing responses.
+    """
+
+    async def query(
+        self, prompt: Any, /, *, session_id: str = "default"
+    ) -> None:
+        # Call parent to track the query
+        await super().query(prompt, session_id=session_id)
+
+        # Auto-generate a simple response if none was queued
+        if not self._active_stream:
+            from anthropic.types import TextBlock, ContentBlock
+            # Simple mock response
+            response_text = "Mock agent response"
+            text_block = TextBlock(type="text", text=response_text)
+            self._active_stream.append(text_block)
+
+
 def create_mock_session_factory():
     """
-    Create session factory using MockAgentClient for E2E tests.
+    Create session factory using AutoRespondingMockAgentClient for E2E tests.
 
     This factory creates BassiAgentSession instances that use the mock client
     instead of the real Claude API, allowing tests to run without API keys
@@ -39,8 +58,8 @@ def create_mock_session_factory():
     """
 
     def mock_client_factory(config: SessionConfig):
-        """Factory that creates MockAgentClient instances"""
-        return MockAgentClient()
+        """Factory that creates AutoRespondingMockAgentClient instances"""
+        return AutoRespondingMockAgentClient()
 
     def factory(
         question_service: InteractiveQuestionService,
@@ -69,20 +88,26 @@ def create_mock_session_factory():
         )
 
         # Create session with mock client factory
-        return BassiAgentSession(config, client_factory=mock_client_factory)
+        session = BassiAgentSession(
+            config, client_factory=mock_client_factory
+        )
+        # Attach workspace to session for later access
+        session.workspace = workspace
+        return session
 
     return factory
 
 
 @pytest.fixture(scope="session")
-@pytest.mark.xdist_group(name="e2e_server")
 def live_server():
     """
     Start web server on localhost:8765 for E2E tests.
 
     Uses mock agent client to avoid real API calls.
-    Uses xdist_group to ensure all E2E tests run in same worker (avoids multiple servers).
     Server runs for entire test session and is shared by all E2E tests.
+
+    NOTE: Tests using this fixture MUST have @pytest.mark.xdist_group(name="e2e_server")
+    to ensure they run in the same worker. Markers on fixtures have no effect.
     """
     # Create server with mock session factory
     session_factory = create_mock_session_factory()
@@ -121,5 +146,15 @@ def live_server():
     yield base_url
 
     # Shutdown server after tests
-    server.should_exit = True
-    thread.join(timeout=5)
+    try:
+        server.should_exit = True
+        # Force shutdown to ensure clean exit
+        if hasattr(server, "force_exit"):
+            server.force_exit = True
+        thread.join(timeout=5)
+
+        # Verify server is actually stopped
+        if thread.is_alive():
+            print("⚠️ Warning: Server thread still alive after 5s timeout")
+    except Exception as e:
+        print(f"⚠️ Warning: Error during server shutdown: {e}")

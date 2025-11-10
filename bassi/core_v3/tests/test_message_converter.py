@@ -489,3 +489,170 @@ class TestEdgeCases:
         # Should handle gracefully
         assert len(events) >= 1
         assert events[0]["type"] == "text_delta"
+
+    def test_unknown_content_block_type(self):
+        """Test handling of unknown content block type (line 118 + branch).
+
+        When AssistantMessage contains a content block that is not one of:
+        TextBlock, ToolUseBlock, ToolResultBlock, or ThinkingBlock,
+        the converter should skip it (return None) and continue processing.
+        """
+
+        # Create a mock unknown content block type
+        class UnknownContentBlock:
+            pass
+
+        message = AssistantMessage(
+            content=[
+                TextBlock(text="Before unknown"),
+                UnknownContentBlock(),  # Unknown type - should be skipped
+                TextBlock(text="After unknown"),
+            ],
+            model=TEST_MODEL,
+        )
+
+        events = convert_message_to_websocket(message)
+
+        # Should skip unknown block and only return the two text blocks
+        assert len(events) == 2
+        assert events[0]["type"] == "text_delta"
+        assert events[0]["text"] == "Before unknown"
+        assert events[1]["type"] == "text_delta"
+        assert events[1]["text"] == "After unknown"
+
+    def test_result_message_with_content_blocks(self):
+        """Test ResultMessage with content blocks (lines 157-160).
+
+        ResultMessage can optionally contain content blocks (like final
+        assistant message content) in addition to usage statistics.
+        """
+        message = ResultMessage(
+            subtype="complete",
+            duration_ms=1000,
+            duration_api_ms=800,
+            is_error=False,
+            num_turns=2,
+            session_id="test-with-content",
+            usage={"input_tokens": 100, "output_tokens": 50},
+            total_cost_usd=0.001,
+        )
+        # Manually add content attribute (SDK may add this in some cases)
+        message.content = [
+            TextBlock(text="Task completed successfully"),
+            ToolResultBlock(
+                tool_use_id="final_tool", content="Final result data"
+            ),
+        ]
+
+        events = convert_message_to_websocket(message)
+
+        # Should have 2 content events + 1 usage event
+        assert len(events) == 3
+        assert events[0]["type"] == "text_delta"
+        assert events[0]["text"] == "Task completed successfully"
+        assert events[1]["type"] == "tool_end"
+        assert events[1]["id"] == "final_tool"
+        assert events[1]["content"] == "Final result data"
+        assert events[2]["type"] == "usage"
+        assert events[2]["input_tokens"] == 100
+        assert events[2]["output_tokens"] == 50
+
+    def test_user_message_with_tool_result_blocks(self):
+        """Test UserMessage with list of ToolResultBlock (lines 190-193).
+
+        UserMessage can contain either:
+        1. Plain text string (user's input)
+        2. List of content blocks (e.g., ToolResultBlock from Agent SDK)
+
+        This tests the second case where SDK passes tool results as
+        UserMessage with ToolResultBlock content.
+        """
+        message = UserMessage(
+            content=[
+                ToolResultBlock(
+                    tool_use_id="user_tool_1",
+                    content="Tool output from user context",
+                    is_error=False,
+                ),
+                ToolResultBlock(
+                    tool_use_id="user_tool_2",
+                    content="Another tool result",
+                    is_error=False,
+                ),
+            ]
+        )
+
+        events = convert_message_to_websocket(message)
+
+        # Should convert list of blocks to tool_end events
+        assert len(events) == 2
+        assert events[0]["type"] == "tool_end"
+        assert events[0]["id"] == "user_tool_1"
+        assert events[0]["content"] == "Tool output from user context"
+        assert events[1]["type"] == "tool_end"
+        assert events[1]["id"] == "user_tool_2"
+        assert events[1]["content"] == "Another tool result"
+
+    def test_result_message_with_unknown_blocks_filtered(self):
+        """Test ResultMessage filters unknown blocks (branch 159->157).
+
+        When ResultMessage.content contains unknown block types,
+        they should be filtered out (event is None, so skip).
+        """
+
+        class UnknownBlock:
+            pass
+
+        message = ResultMessage(
+            subtype="complete",
+            duration_ms=500,
+            duration_api_ms=400,
+            is_error=False,
+            num_turns=1,
+            session_id="test-unknown",
+            usage={"input_tokens": 10, "output_tokens": 5},
+        )
+        message.content = [
+            TextBlock(text="Before"),
+            UnknownBlock(),  # Should be filtered (returns None)
+            TextBlock(text="After"),
+        ]
+
+        events = convert_message_to_websocket(message)
+
+        # Should have 2 text events + 1 usage event (unknown block filtered)
+        assert len(events) == 3
+        assert events[0]["type"] == "text_delta"
+        assert events[0]["text"] == "Before"
+        assert events[1]["type"] == "text_delta"
+        assert events[1]["text"] == "After"
+        assert events[2]["type"] == "usage"
+
+    def test_user_message_with_unknown_blocks_filtered(self):
+        """Test UserMessage filters unknown blocks (branch 192->190).
+
+        When UserMessage.content (as list) contains unknown block types,
+        they should be filtered out (event is None, so skip).
+        """
+
+        class UnknownBlock:
+            pass
+
+        message = UserMessage(
+            content=[
+                ToolResultBlock(
+                    tool_use_id="valid_tool", content="Valid result"
+                ),
+                UnknownBlock(),  # Should be filtered (returns None)
+                TextBlock(text="Also valid"),
+            ]
+        )
+
+        events = convert_message_to_websocket(message)
+
+        # Should have 2 events (unknown block filtered)
+        assert len(events) == 2
+        assert events[0]["type"] == "tool_end"
+        assert events[0]["id"] == "valid_tool"
+        assert events[1]["type"] == "text_delta"
+        assert events[1]["text"] == "Also valid"

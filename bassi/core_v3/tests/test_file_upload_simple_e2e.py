@@ -186,13 +186,15 @@ def test_upload_file_via_button(page, live_server, test_file):
     file_chip = page.query_selector(".file-chip")
     assert file_chip is not None, "File chip should appear in container"
 
-    # Verify file name is displayed
+    # Verify file name is displayed (with hash suffix from server)
     file_name_el = page.query_selector(".file-chip-name")
     assert file_name_el is not None, "File name element should exist"
     file_name = file_name_el.text_content()
+    # Server adds hash to filename: test_document_{hash}.txt
+    # So we check for the base name and extension separately
     assert (
-        "test_document.txt" in file_name
-    ), f"File name should be displayed, got: {file_name}"
+        "test_document" in file_name and ".txt" in file_name
+    ), f"File name should contain base name and extension, got: {file_name}"
 
     print(f"✅ File uploaded successfully to chips container: {file_name}")
 

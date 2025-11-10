@@ -122,3 +122,68 @@ def terminal_keys():
 def mock_agent_client():
     """Provide a reusable mock AgentClient for unit tests."""
     return MockAgentClient()
+
+
+def pytest_configure(config):
+    """
+    Pytest configuration hook - runs before test collection.
+
+    This disables SDK wrapping for MCP server tests by replacing
+    SDK functions with stubs before any MCP server modules are imported.
+
+    IMPORTANT: Only stubs SDK for V1 tests, NOT E2E tests which need real SDK!
+    """
+    import sys
+    from typing import Any, Callable
+
+    # Check if we're running E2E tests - they need the real SDK
+    # E2E tests are marked with @pytest.mark.e2e and run sequentially
+    try:
+        # Get marker expression from command line
+        marker_expr = config.getoption("-m", default="")
+        # If running E2E tests exclusively, skip SDK stubbing
+        if marker_expr == "e2e":
+            print("\n⚠️  Running E2E tests - keeping real SDK enabled")
+            return
+    except (ValueError, AttributeError):
+        pass  # Marker not specified, proceed with stubbing
+
+    # Delete sdk_loader if already imported
+    if "bassi.shared.sdk_loader" in sys.modules:
+        del sys.modules["bassi.shared.sdk_loader"]
+
+    # Also delete MCP server modules if imported
+    for module_name in list(sys.modules.keys()):
+        if module_name.startswith("bassi.mcp_servers."):
+            del sys.modules[module_name]
+
+    # Import sdk_loader
+    import bassi.shared.sdk_loader
+
+    # Force SDK_AVAILABLE = False
+    bassi.shared.sdk_loader.SDK_AVAILABLE = False
+
+    # Replace SDK functions with stubs (critical - just setting SDK_AVAILABLE isn't enough!)
+    def stub_tool(*decorator_args: Any, **decorator_kwargs: Any):
+        """Stub decorator - returns function unchanged"""
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+    def stub_create_sdk_mcp_server(
+        *, name: str, version: str, tools: list[Callable[..., Any]]
+    ) -> dict[str, Any]:
+        """Stub MCP server factory"""
+        return {
+            "name": name,
+            "version": version,
+            "type": "mcp_server",  # Add type field expected by tests
+            "tools": tools,
+            "sdk_available": False,
+        }
+
+    # Monkey-patch the module to use stubs
+    bassi.shared.sdk_loader.tool = stub_tool
+    bassi.shared.sdk_loader.create_sdk_mcp_server = stub_create_sdk_mcp_server

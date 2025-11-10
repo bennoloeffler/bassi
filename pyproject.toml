@@ -22,6 +22,7 @@ dependencies = [
     "websockets>=15.0.1",
     "fastmcp>=2.13.0.2",
     "watchfiles>=1.1.1",
+    "pytest-cov>=7.0.0",
 ]
 
 [project.scripts]
@@ -67,13 +68,18 @@ testpaths = ["tests", "bassi/core_v3/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short -n auto"  # pytest-xdist parallel execution (E2E tests use --dist no via marker)
+addopts = "-v --tb=short"  # E2E tests require sequential execution (don't use -n auto)
 asyncio_mode = "auto"  # Fix event loop conflicts with pytest-asyncio
 asyncio_default_fixture_loop_scope = "function"  # Isolate event loops per test
 markers = [
     "integration: marks tests as integration tests (require API keys)",
     "asyncio: marks tests as async",
     "e2e: marks tests as end-to-end Playwright tests (run separately)",
+]
+filterwarnings = [
+    "ignore:websockets.legacy is deprecated:DeprecationWarning",
+    "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
+    "ignore:remove second argument of ws_handler:DeprecationWarning",
 ]
 
 [dependency-groups]
