@@ -1,0 +1,35 @@
+[run]
+# Source code to measure coverage for
+source = bassi
+
+# Files to omit from coverage
+omit =
+    */tests/*
+    */test_*.py
+    *conftest.py
+
+# Enable branch coverage
+branch = True
+
+[report]
+# Show missing lines
+show_missing = True
+
+# Exclude patterns for lines that should be ignored
+exclude_lines =
+    # Standard exclusions
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+
+    # Development/debugging code
+    except ImportError:
+    if False:
+    if 0:
+
+# Sort results by name
+sort = Name
