@@ -1,5 +1,8 @@
 # File Chips Concept: Keep Files in Input Area Until Sent
 
+**Status**: ✅ **IMPLEMENTED** (2025-11-16)
+**Implementation**: File chips are integrated into input area (ChatGPT/Claude.ai pattern)
+
 ## Problem Statement
 
 **Current (WRONG) behavior:**

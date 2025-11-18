@@ -21,6 +21,7 @@ class BassiWebClient {
         this.isConnected = false
         this.reconnectAttempts = 0
         this.maxReconnectAttempts = 5
+        this.isIntentionalDisconnect = false  // Track intentional disconnects (session switch)
 
         // State
         this.blocks = new Map()              // id -> DOM element
@@ -200,7 +201,8 @@ class BassiWebClient {
             }
 
             const data = await response.json()
-            this.sessionFiles = data.files || []
+            // Backend returns flat array, not {files: [...]}
+            this.sessionFiles = Array.isArray(data) ? data : (data.files || [])
 
             console.log('📁 Session files loaded:', this.sessionFiles.length)
 
@@ -221,12 +223,17 @@ class BassiWebClient {
         }
 
         // Convert session files to staged files format
-        const sessionStagedFiles = this.sessionFiles.map(file => ({
-            filename: file.name,  // Use 'filename' to match addFileToStaging() format
-            size: file.size,
-            uploadedPath: file.path,
-            isSessionFile: true  // Mark as already persisted
-        }))
+        const sessionStagedFiles = this.sessionFiles.map(file => {
+            // Backend returns path like "DATA_FROM_USER/test_document_88fd1df3fb2ec431.txt"
+            // Extract just the filename
+            const filename = file.path.split('/').pop()
+            return {
+                filename: filename,  // Use 'filename' to match addFileToStaging() format
+                size: file.size,
+                uploadedPath: file.path,
+                isSessionFile: true  // Mark as already persisted
+            }
+        })
 
         // Merge with currently staged files (avoid duplicates by name)
         const existingNames = new Set(this.stagedFiles.map(f => f.filename))
@@ -317,6 +324,7 @@ class BassiWebClient {
         const settingsModal = document.getElementById('settings-modal')
         const settingsClose = document.getElementById('settings-close')
         const thinkingToggle = document.getElementById('thinking-toggle')
+        const globalBypassToggle = document.getElementById('global-bypass-toggle')
 
         // Load thinking preference from localStorage
         const showThinking = localStorage.getItem('showThinking')
@@ -328,6 +336,9 @@ class BassiWebClient {
             thinkingToggle.checked = true
             document.body.classList.remove('hide-thinking')
         }
+
+        // Load global bypass setting from backend
+        this.loadGlobalBypassSetting()
 
         // Open settings modal
         if (settingsButton) {
@@ -386,6 +397,114 @@ class BassiWebClient {
                 }
             })
         }
+
+        // Handle global bypass toggle
+        if (globalBypassToggle) {
+            globalBypassToggle.addEventListener('change', async (e) => {
+                const enabled = e.target.checked
+                await this.updateGlobalBypass(enabled)
+            })
+        }
+    }
+
+    async loadGlobalBypassSetting() {
+        // Load global bypass setting from backend
+        try {
+            const response = await fetch('/api/settings/global-bypass')
+            if (response.ok) {
+                const data = await response.json()
+                const toggle = document.getElementById('global-bypass-toggle')
+                if (toggle) {
+                    toggle.checked = data.enabled
+                    console.log(`🔐 Global bypass loaded: ${data.enabled}`)
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load global bypass setting:', error)
+        }
+    }
+
+    async updateGlobalBypass(enabled) {
+        // Update global bypass setting on backend
+        try {
+            const response = await fetch('/api/settings/global-bypass', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ enabled })
+            })
+
+            if (response.ok) {
+                this.showNotification(
+                    enabled
+                        ? '🔓 All tools allowed - agent runs autonomously'
+                        : '🔐 Tool permissions managed - agent will ask before using tools',
+                    'success'
+                )
+
+                console.log(`✅ Global bypass updated: ${enabled}`)
+
+                // Suggest refresh if session is active
+                if (this.sessionId) {
+                    this.showNotification(
+                        'Start a new session for changes to take effect',
+                        'info'
+                    )
+                }
+            } else {
+                throw new Error('Failed to update setting')
+            }
+        } catch (error) {
+            console.error('Failed to update global bypass:', error)
+
+            // Revert toggle on error
+            const toggle = document.getElementById('global-bypass-toggle')
+            if (toggle) {
+                toggle.checked = !enabled
+            }
+
+            this.showNotification(
+                'Failed to update permission setting',
+                'error'
+            )
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        // Show a toast notification to the user
+        // Create notification element
+        const notification = document.createElement('div')
+        notification.className = `notification notification-${type}`
+        notification.textContent = message
+
+        // Style
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#ef4444' : type === 'success' ? '#10b981' : '#3b82f6'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10000;
+            animation: slideIn 0.3s ease-out;
+            max-width: 300px;
+            font-size: 14px;
+        `
+
+        document.body.appendChild(notification)
+
+        // Remove after 4 seconds
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease-out'
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    document.body.removeChild(notification)
+                }
+            }, 300)
+        }, 4000)
     }
 
     // ========== Autocomplete Panel ==========
@@ -663,6 +782,14 @@ class BassiWebClient {
         this.ws.onclose = () => {
             console.log('❌ WebSocket disconnected')
             this.isConnected = false
+
+            // Don't update status or reconnect if this was intentional (session switch)
+            if (this.isIntentionalDisconnect) {
+                console.log('🔄 Intentional disconnect (session switch) - not reconnecting')
+                this.isIntentionalDisconnect = false
+                return
+            }
+
             this.updateConnectionStatus('disconnected')
 
             // Auto-reconnect with exponential backoff
@@ -1535,10 +1662,10 @@ class BassiWebClient {
             // Hide stop button
             this.stopButton.style.display = 'none'
 
-            // Disable send button if no input
-            if (!this.messageInput.value.trim()) {
-                this.sendButton.disabled = true
-            }
+            // 🔧 BUG FIX: NEVER disable send button when agent is idle
+            // The button should always be enabled when connected
+            // Input validation happens in sendMessage() method
+            this.sendButton.disabled = false
 
             // Hide status indicator
             this.hideServerStatus()
@@ -1556,7 +1683,14 @@ class BassiWebClient {
             <div class="message-content">${this.escapeHtml(content)}</div>
         `
         this.conversationEl.appendChild(messageEl)
-        this.scrollToBottom()
+
+        // Force scroll after user message with delay for DOM rendering
+        // Wait for fade-in animation (300ms) + extra buffer (50ms)
+        console.log('💬 [USER] User message appended, scheduling scroll in 350ms...')
+        setTimeout(() => {
+            console.log('⏰ [USER] 350ms timeout fired, calling forceScrollToBottom...')
+            this.forceScrollToBottom()
+        }, 350)
     }
 
     addUserMessageWithImages(content, images, files = []) {
@@ -1598,7 +1732,9 @@ class BassiWebClient {
         messageEl.innerHTML = messageHtml
         this.conversationEl.appendChild(messageEl)
 
-        this.scrollToBottom()
+        // Force scroll after user message with delay for DOM rendering
+        // Wait for fade-in animation (300ms) + extra buffer (50ms)
+        setTimeout(() => this.forceScrollToBottom(), 350)
     }
 
     addHintMessage(content) {
@@ -1612,7 +1748,10 @@ class BassiWebClient {
             <div class="message-content">${this.escapeHtml(content)}</div>
         `
         this.conversationEl.appendChild(hintMsg)
-        this.scrollToBottom()
+
+        // Delay scroll for DOM rendering
+        // Wait for fade-in animation (300ms) + extra buffer (50ms)
+        setTimeout(() => this.forceScrollToBottom(), 350)
     }
 
     addSystemMessage(message, temporary = false) {
@@ -1630,7 +1769,10 @@ class BassiWebClient {
             <div class="system-content">${this.escapeHtml(message)}</div>
         `
         this.conversationEl.appendChild(messageEl)
-        this.scrollToBottom()
+
+        // Delay scroll for DOM rendering
+        // Wait for fade-in animation (300ms) + extra buffer (50ms)
+        setTimeout(() => this.forceScrollToBottom(), 350)
         return messageEl
     }
 
@@ -1673,6 +1815,9 @@ class BassiWebClient {
 
                 // Load any existing session files (for resumed sessions)
                 this.loadSessionFiles()
+
+                // Refresh session list to include this new session
+                this.loadSessions()
 
                 // Only clear and show welcome if conversation is empty
                 // (If switching sessions, conversation already has loaded history)
@@ -1768,6 +1913,11 @@ class BassiWebClient {
                 }
                 break
 
+            case 'permission_request':
+                // Agent requesting permission to use a tool
+                this.handlePermissionRequest(msg)
+                break
+
             default:
                 console.warn('Unknown message type:', msg.type)
         }
@@ -1815,6 +1965,14 @@ class BassiWebClient {
             </div>
         `
         this.conversationEl.appendChild(welcomeEl)
+
+        // Use setTimeout to ensure DOM is rendered before scrolling
+        // Wait for fade-in animation (300ms) + extra buffer (50ms)
+        console.log('💬 [WELCOME] Welcome message appended, scheduling scroll in 350ms...')
+        setTimeout(() => {
+            console.log('⏰ [WELCOME] 350ms timeout fired, calling forceScrollToBottom...')
+            this.forceScrollToBottom()
+        }, 350)
     }
 
     async loadCapabilities() {
@@ -2503,7 +2661,10 @@ class BassiWebClient {
 
         // Render markdown immediately (streaming!)
         this.renderMarkdownStreaming(textBlock, newBuffer)
-        this.scrollToBottom()
+
+        // During streaming, force scroll to show new content (use smooth for better UX)
+        // Delay scroll to let DOM render (especially for markdown + code highlighting)
+        setTimeout(() => this.forceScrollToBottomSmooth(), 50)
     }
 
     renderMarkdownStreaming(element, markdown) {
@@ -2570,7 +2731,9 @@ class BassiWebClient {
             <div class="thinking-content">${this.escapeHtml(msg.text)}</div>
         `
         contentEl.appendChild(thinkingBlock)
-        this.scrollToBottom()
+
+        // Delay scroll to let DOM render
+        setTimeout(() => this.scrollToBottom(), 50)
     }
 
     // ========== Tool Handlers ==========
@@ -2697,7 +2860,9 @@ class BassiWebClient {
 
         contentEl.appendChild(toolPanel)
         this.blocks.set(msg.id, toolPanel)
-        this.scrollToBottom()
+
+        // Use forceScrollToBottom with delay to ensure DOM is rendered
+        setTimeout(() => this.forceScrollToBottom(), 50)
     }
 
     handleToolEnd(msg) {
@@ -2744,7 +2909,8 @@ class BassiWebClient {
             }
         }
 
-        this.scrollToBottom()
+        // Use forceScrollToBottom with delay to ensure DOM is rendered
+        setTimeout(() => this.forceScrollToBottom(), 50)
     }
 
     // ========== Message Complete Handler ==========
@@ -2760,10 +2926,18 @@ class BassiWebClient {
 
         // Ready for next message
         this.currentMessage = null
-        this.scrollToBottom()
+
+        // Delay scroll to ensure typing indicator removal is rendered
+        setTimeout(() => this.scrollToBottom(), 50)
 
         // Reset UI to idle state
         this.setAgentWorking(false)
+
+        // 🔄 BUG FIX: Refresh session list to update last_activity timestamp
+        // This ensures the active session moves to the top of the list
+        if (this.sessionList) {
+            this.loadSessions()
+        }
     }
 
     // ========== Usage Handler ==========
@@ -3001,19 +3175,120 @@ class BassiWebClient {
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop
         const scrollHeight = document.documentElement.scrollHeight
         const clientHeight = window.innerHeight
-        return scrollHeight - scrollTop - clientHeight < threshold
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+
+        console.log('📊 [SCROLL] isScrolledToBottom:', {
+            scrollTop,
+            scrollHeight,
+            clientHeight,
+            distanceFromBottom,
+            threshold,
+            result: distanceFromBottom < threshold
+        })
+
+        return distanceFromBottom < threshold
     }
 
     scrollToBottom() {
         // Only auto-scroll if user is already at bottom
+        // Use a lightweight check since this is called frequently during streaming
+        console.log('📜 [SCROLL] scrollToBottom() called (smart scroll)')
         if (this.isScrolledToBottom()) {
+            console.log('✅ [SCROLL] User is at bottom, scrolling...')
+            // Use double RAF to ensure layout is ready (lighter than forceScrollToBottom)
             requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    const scrollHeight = document.documentElement.scrollHeight
+                    const viewportHeight = window.innerHeight
+                    const targetScroll = scrollHeight - viewportHeight
+                    console.log(`🎯 [SCROLL] Scrolling to ${targetScroll} (height: ${scrollHeight}, viewport: ${viewportHeight})`)
+                    window.scrollTo({
+                        top: targetScroll,
+                        behavior: 'smooth'
+                    })
+                })
+            })
+        } else {
+            console.log('⏭️ [SCROLL] User scrolled up, skipping auto-scroll')
+        }
+    }
+
+    forceScrollToBottom() {
+        // Force scroll to bottom (used on initial page load)
+        // Wait for layout to stabilize before scrolling
+        console.log('🚀 [SCROLL] forceScrollToBottom() called (forced scroll)')
+        
+        // Use multiple requestAnimationFrame calls to wait for layout to complete
+        // This ensures scrollHeight has reached its final value
+        let lastHeight = 0
+        let stableCount = 0
+        const maxWaitFrames = 10  // Maximum frames to wait for stability
+        
+        const checkAndScroll = () => {
+            const currentHeight = document.documentElement.scrollHeight
+            const viewportHeight = window.innerHeight
+            
+            // If height hasn't changed for 2 frames, consider it stable
+            if (currentHeight === lastHeight) {
+                stableCount++
+                if (stableCount >= 2) {
+                    // Layout is stable, perform scroll
+                    const targetScroll = currentHeight - viewportHeight
+                    console.log(`🎯 [SCROLL] Layout stable. Force scrolling to ${targetScroll} (height: ${currentHeight}, viewport: ${viewportHeight})`)
+                    window.scrollTo({
+                        top: targetScroll,
+                        behavior: 'instant'
+                    })
+                    
+                    // Verify scroll completed
+                    requestAnimationFrame(() => {
+                        const actualScroll = window.pageYOffset || document.documentElement.scrollTop
+                        const distanceFromBottom = currentHeight - actualScroll - viewportHeight
+                        console.log(`✅ [SCROLL] Scroll complete: position=${actualScroll}, distanceFromBottom=${distanceFromBottom}px`)
+                    })
+                    return
+                }
+            } else {
+                stableCount = 0  // Reset counter if height changed
+            }
+            
+            lastHeight = currentHeight
+            
+            // Continue waiting if we haven't exceeded max frames
+            if (stableCount < maxWaitFrames) {
+                requestAnimationFrame(checkAndScroll)
+            } else {
+                // Timeout - scroll anyway with current height
+                const targetScroll = currentHeight - viewportHeight
+                console.log(`⚠️ [SCROLL] Layout timeout. Scrolling to ${targetScroll}`)
                 window.scrollTo({
-                    top: document.body.scrollHeight,
+                    top: targetScroll,
+                    behavior: 'instant'
+                })
+            }
+        }
+        
+        requestAnimationFrame(checkAndScroll)
+    }
+
+    forceScrollToBottomSmooth() {
+        // Force scroll to bottom with smooth behavior (used during streaming)
+        // This ensures we scroll even if user isn't currently at bottom
+        console.log('🌊 [SCROLL] forceScrollToBottomSmooth() called (forced smooth scroll)')
+        
+        // Use double RAF to ensure layout is ready
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const scrollHeight = document.documentElement.scrollHeight
+                const viewportHeight = window.innerHeight
+                const targetScroll = scrollHeight - viewportHeight
+                console.log(`🎯 [SCROLL] Force smooth scrolling to ${targetScroll} (height: ${scrollHeight}, viewport: ${viewportHeight})`)
+                window.scrollTo({
+                    top: targetScroll,
                     behavior: 'smooth'
                 })
             })
-        }
+        })
     }
 
     // ========== Verbose Level Management ==========
@@ -3262,6 +3537,123 @@ class BassiWebClient {
         dialog.appendChild(submitBtn)
 
         return dialog
+    }
+
+    // ========== Permission Requests ==========
+
+    handlePermissionRequest(msg) {
+        console.log('🔐 Permission request received:', msg)
+
+        // Create permission dialog
+        const dialog = this.createPermissionDialog(msg)
+
+        // Add to conversation
+        if (this.currentMessage) {
+            const messageContent = this.currentMessage.querySelector('.message-content')
+            if (messageContent) {
+                messageContent.appendChild(dialog)
+            } else {
+                this.currentMessage.appendChild(dialog)
+            }
+        } else {
+            const permissionContainer = document.createElement('div')
+            permissionContainer.className = 'message permission-message'
+            permissionContainer.appendChild(dialog)
+            this.conversationEl.appendChild(permissionContainer)
+        }
+
+        this.scrollToBottom()
+    }
+
+    createPermissionDialog(msg) {
+        const dialog = document.createElement('div')
+        dialog.className = 'permission-dialog'
+
+        // Header
+        const header = document.createElement('div')
+        header.className = 'permission-header'
+        header.innerHTML = `<strong>🔐 Tool Permission Required</strong>`
+        dialog.appendChild(header)
+
+        // Message
+        const message = document.createElement('div')
+        message.className = 'permission-message-text'
+        message.textContent = msg.message || `The agent wants to use the '${msg.tool_name}' tool.`
+        dialog.appendChild(message)
+
+        // Options container
+        const optionsContainer = document.createElement('div')
+        optionsContainer.className = 'permission-options'
+
+        const options = [
+            {
+                scope: 'one_time',
+                label: 'This one time',
+                description: 'Allow just this single use',
+                icon: '1️⃣'
+            },
+            {
+                scope: 'session',
+                label: 'This session',
+                description: 'Allow for current session',
+                icon: '🔄'
+            },
+            {
+                scope: 'persistent',
+                label: 'All sessions',
+                description: 'Allow across all sessions',
+                icon: '💾'
+            },
+            {
+                scope: 'global',
+                label: 'All tools always',
+                description: 'Bypass all permissions forever',
+                icon: '🌐'
+            }
+        ]
+
+        options.forEach(option => {
+            const button = document.createElement('button')
+            button.className = 'permission-option'
+            button.dataset.scope = option.scope
+
+            const labelEl = document.createElement('div')
+            labelEl.className = 'option-label'
+            labelEl.innerHTML = `${option.icon} ${option.label}`
+
+            const descEl = document.createElement('div')
+            descEl.className = 'option-description'
+            descEl.textContent = option.description
+
+            button.appendChild(labelEl)
+            button.appendChild(descEl)
+
+            button.addEventListener('click', () => {
+                this.sendPermissionResponse(msg.tool_name, option.scope)
+                dialog.remove()
+            })
+
+            optionsContainer.appendChild(button)
+        })
+
+        dialog.appendChild(optionsContainer)
+        return dialog
+    }
+
+    sendPermissionResponse(toolName, scope) {
+        console.log(`📤 Sending permission response: ${toolName} → ${scope}`)
+
+        const message = {
+            type: 'permission_response',
+            tool_name: toolName,
+            scope: scope
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(message))
+        } else {
+            console.error('❌ Cannot send permission response - WebSocket not connected')
+        }
     }
 
     sendQuestionAnswer(questionId, answers) {
@@ -3522,7 +3914,8 @@ class BassiWebClient {
 
         console.log(`🔄 Switching to session: ${sessionId}`)
 
-        // Close current WebSocket connection
+        // Close current WebSocket connection (intentionally)
+        this.isIntentionalDisconnect = true
         if (this.ws) {
             this.ws.close()
         }
@@ -3583,8 +3976,9 @@ class BassiWebClient {
                 }
             }
 
-            // Scroll to bottom after loading all messages
-            this.scrollToBottom()
+            // Scroll to bottom after loading all messages with delay for DOM rendering
+            // Wait for fade-in animation (300ms) + extra buffer (50ms)
+            setTimeout(() => this.forceScrollToBottom(), 350)
 
         } catch (error) {
             console.error('❌ Error loading message history:', error)
@@ -3593,10 +3987,11 @@ class BassiWebClient {
 
     renderUserMessage(content) {
         /**
-         * Render a user message in the conversation.
+         * Render a user message in the conversation (from history).
+         * Matches the real-time rendering format exactly.
          */
         const messageDiv = document.createElement('div')
-        messageDiv.className = 'message user-message'
+        messageDiv.className = 'user-message'
 
         const contentDiv = document.createElement('div')
         contentDiv.className = 'message-content'
@@ -3608,6 +4003,64 @@ class BassiWebClient {
 
     renderAssistantMessage(content) {
         /**
+         * Render an assistant message in the conversation (from history).
+         * Matches the real-time rendering format exactly, including:
+         * - Message header with icon and assistant name
+         * - Markdown parsing and syntax highlighting
+         * - Text block structure
+         */
+        const messageDiv = document.createElement('div')
+        messageDiv.className = 'assistant-message'
+
+        // Add message header (same as real-time rendering)
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <span class="assistant-icon">🤖</span>
+                <span class="assistant-name">Bassi</span>
+            </div>
+            <div class="message-content"></div>
+        `
+
+        const contentEl = messageDiv.querySelector('.message-content')
+
+        // Create text block for content
+        const textBlock = document.createElement('div')
+        textBlock.className = 'text-block'
+
+        // Render markdown (same as real-time rendering)
+        if (this.markdownRenderer) {
+            try {
+                const html = this.markdownRenderer.parse(content)
+                textBlock.innerHTML = html
+
+                // Highlight code blocks
+                if (typeof Prism !== 'undefined') {
+                    textBlock.querySelectorAll('pre code').forEach(codeBlock => {
+                        const className = codeBlock.className
+                        const match = className.match(/language-(\w+)/)
+                        const lang = match ? match[1] : 'javascript'
+
+                        if (Prism.languages[lang]) {
+                            Prism.highlightElement(codeBlock)
+                        }
+                    })
+                }
+            } catch (e) {
+                console.error('Markdown rendering error:', e)
+                textBlock.textContent = content
+            }
+        } else {
+            // Fallback: plain text
+            textBlock.textContent = content
+        }
+
+        contentEl.appendChild(textBlock)
+        this.conversationEl.appendChild(messageDiv)
+    }
+
+    renderUserMessageOld(content) {
+        /**
+         * OLD VERSION - DO NOT USE
          * Render an assistant message in the conversation.
          */
         const messageDiv = document.createElement('div')
@@ -3670,7 +4123,8 @@ class BassiWebClient {
          */
         console.log('➕ Creating new session')
 
-        // Close current WebSocket connection
+        // Close current WebSocket connection (intentionally)
+        this.isIntentionalDisconnect = true
         if (this.ws) {
             this.ws.close()
         }

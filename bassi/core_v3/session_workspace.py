@@ -455,7 +455,9 @@ class SessionWorkspace:
                 line = line.rstrip("\n")
 
                 # Check for message header: ## User - timestamp or ## Assistant - timestamp
-                if line.startswith("## "):
+                # CRITICAL: Only match if line contains " - " (timestamp separator)
+                # This prevents treating markdown headings (## Background) as message boundaries
+                if line.startswith("## ") and " - " in line:
                     # Save previous message if exists
                     if current_message is not None:
                         messages.append(current_message)

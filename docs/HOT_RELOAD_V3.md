@@ -29,22 +29,32 @@ Both mechanisms work together to provide a smooth development experience.
 
 ### Implementation
 
-**File**: `bassi/core_v3/web_server_v3.py:682-691`
+**File**: `bassi/core_v3/web_server_v3.py:344-413`
 
+**When reload=True** (uses uvicorn CLI):
 ```python
-config = uvicorn.Config(
-    app=self.app,
-    host=self.host,
-    port=self.port,
-    log_level="info",
-    reload=reload,  # ✅ Enables file watching
-    reload_dirs=[str(Path(__file__).parent.parent)]  # ✅ Watches bassi/
-)
-server = uvicorn.Server(config)
-await server.serve()
+subprocess.run([
+    sys.executable,
+    "-m",
+    "uvicorn",
+    "bassi.core_v3.web_server_v3:get_app",  # Module path string
+    "--factory",  # Factory function flag
+    "--host", "localhost",
+    "--port", "8765",
+    "--reload",  # CLI reload flag
+    "--reload-dir", reload_dir,  # Watches bassi/
+])
 ```
 
-**Enabled by**: `run-web-v3.py:49`
+**Factory function** (required for --factory):
+```python
+def get_app() -> FastAPI:
+    """Factory function for uvicorn CLI reload mode."""
+    server = WebUIServerV3(workspace_base_path="chats")
+    return server.app
+```
+
+**Enabled by**: `bassi/core_v3/cli.py:50`
 ```python
 await start_web_server_v3(
     host="localhost",
@@ -52,6 +62,8 @@ await start_web_server_v3(
     reload=True,  # ✅ Hot reload enabled
 )
 ```
+
+**Note**: Uvicorn reload requires CLI mode, not programmatic API. See `docs/AUTORELOAD_FIX_2025-11-16.md` for details.
 
 ### What Happens Step-by-Step
 

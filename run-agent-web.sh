@@ -45,6 +45,7 @@ export PYTHONUNBUFFERED=1
 echo "⏰ Log started at: $(date '+%Y-%m-%d %H:%M:%S')" > /tmp/bassi-web.log
 echo "" >> /tmp/bassi-web.log
 
-# Run V3 web UI using the bassi-web command (has reload=True)
-# Logs to both stdout and /tmp/bassi-web.log
+# Run V3 web UI with uvicorn hot reload enabled
+# uvicorn's reload watches Python files in bassi/ directory
+# For static files (HTML/CSS/JS), refresh browser (F5) to see changes
 uv run bassi-web 2>&1 | tee -a /tmp/bassi-web.log

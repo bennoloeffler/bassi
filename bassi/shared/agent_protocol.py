@@ -80,11 +80,8 @@ class ClaudeAgentClient:
 
 
 def resolve_model_id(config: "SessionConfig") -> str:
-    base_model = getattr(config, "model_id", "claude-sonnet-4-5-20250929")
-    thinking_mode = getattr(config, "thinking_mode", False)
-    if thinking_mode and not base_model.endswith(":thinking"):
-        return f"{base_model}:thinking"
-    return base_model
+    """Get the base model ID (without thinking suffix - thinking is handled via parameter)."""
+    return getattr(config, "model_id", "claude-sonnet-4-5-20250929")
 
 
 def default_claude_client_factory(config: "SessionConfig") -> AgentClient:
@@ -107,6 +104,8 @@ def build_claude_agent_options(config: "SessionConfig"):
 
     from bassi.shared.sdk_loader import ClaudeAgentOptions
 
+    # Build options - note: SDK doesn't support 'thinking' parameter
+    # Thinking mode would need to be enabled via model suffix if supported
     options = ClaudeAgentOptions(
         model=resolve_model_id(config),
         allowed_tools=getattr(config, "allowed_tools", None),

@@ -1,5 +1,8 @@
 # Agent Hints Feature
 
+**Status**: ❌ **NOT IMPLEMENTED** (Planning/Specification)
+**Last Updated**: 2025-11-16
+
 ## Overview
 
 Allow users to provide hints/guidance to Claude while it's actively working on a task, without fully interrupting and restarting the conversation. The agent should incorporate the hint and continue with the original task.

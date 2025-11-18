@@ -3,8 +3,9 @@
 **Feature**: Extended Thinking Mode Toggle
 **Priority**: MEDIUM ⭐⭐
 **Phase**: 2
-**Status**: Specification
+**Status**: ⚠️ **PARTIALLY IMPLEMENTED** (Model switching ✅, UI toggle ✅, Full functionality ❓)
 **Version**: 1.0
+**Last Updated**: 2025-11-16
 
 ---
 

@@ -19,7 +19,6 @@ SortField = Literal[
     "last_activity", "created_at", "message_count", "file_count"
 ]
 
-
 class SessionIndex:
     """
     In-memory index for fast session listing.
@@ -141,6 +140,11 @@ class SessionIndex:
             workspace: SessionWorkspace to add
         """
         stats = workspace.get_stats()
+
+        logger.debug(
+            f"📝 add_session: workspace.display_name={workspace.display_name}, "
+            f"stats={stats}"
+        )
 
         self.index["sessions"][workspace.session_id] = {
             "session_id": workspace.session_id,

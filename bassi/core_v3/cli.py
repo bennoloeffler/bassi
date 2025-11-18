@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point for bassi-web command"""
+    logger.info("🚀 BELBEL")
     logger.info("🚀 Starting Bassi Web UI V3 (Agent SDK)")
     logger.info("📁 Open http://localhost:8765 in your browser")
     logger.info("")
@@ -40,12 +41,13 @@ def main():
     # - Uses claude-agent-sdk
     # - Auto-accepts file edits
     # - All tools enabled (including MCP)
+    # - Hot reload enabled for development (watches Python files)
     try:
         asyncio.run(
             start_web_server_v3(
                 host="localhost",
                 port=8765,
-                reload=True,  # Hot reload enabled for development
+                reload=True,  # Enable uvicorn hot reload for fast development
             )
         )
     except KeyboardInterrupt:

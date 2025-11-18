@@ -43,7 +43,7 @@ class SessionConfig:
 
     # Model configuration
     model_id: str = "claude-sonnet-4-5-20250929"
-    thinking_mode: bool = False  # Use :thinking model variant
+    thinking_mode: bool = False  # Enable extended thinking via thinking parameter (not model suffix)
 
     # MCP servers
     mcp_servers: dict[str, Any] = field(default_factory=dict)
@@ -196,6 +196,20 @@ class BassiAgentSession:
             f"🔷 [SESSION] Restoring {len(history)} messages from workspace"
         )
 
+        # CRITICAL: Clear existing message history before restoring
+        # (single agent is shared across sessions, so we must clear old context)
+        if self.message_history:
+            logger.info(
+                f"🧹 [SESSION] Clearing {len(self.message_history)} existing messages"
+            )
+            self.message_history.clear()
+
+        # Import TextBlock for AssistantMessage content
+        from bassi.shared.sdk_types import TextBlock
+
+        # Get model for AssistantMessage (required parameter)
+        model = self.get_model_id()
+
         for msg in history:
             role = msg["role"]
             content = msg["content"]
@@ -203,7 +217,14 @@ class BassiAgentSession:
             if role == "user":
                 self.message_history.append(UserMessage(content=content))
             elif role == "assistant":
-                self.message_history.append(AssistantMessage(content=content))
+                # AssistantMessage requires:
+                # 1. content: list of content blocks (not string)
+                # 2. model: string (required)
+                self.message_history.append(
+                    AssistantMessage(
+                        content=[TextBlock(text=content)], model=model
+                    )
+                )
             else:
                 logger.warning(f"⚠️ Unknown message role: {role}, skipping")
 

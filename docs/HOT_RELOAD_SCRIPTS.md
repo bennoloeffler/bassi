@@ -30,8 +30,9 @@ This document describes the new hot reload wrapper scripts for running Bassi in 
 1. Runs `uv run bassi-web` which calls `bassi/core_v3/cli.py:main()`
 2. CLI sets `reload=True` when calling `start_web_server_v3()`
 3. Server detects reload mode and uses uvicorn CLI with `--reload` flag
-4. Uvicorn uses `watchfiles` package to monitor `bassi/` directory
+4. Uvicorn uses `watchfiles` library (built-in) to monitor `bassi/` directory
 5. When Python files change, uvicorn restarts the entire server process
+6. Uses `get_app()` factory function for proper reload support
 
 **Technical Details**:
 - Uses uvicorn CLI (not programmatic API) for proper reload support

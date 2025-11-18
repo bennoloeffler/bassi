@@ -160,12 +160,23 @@ bassi/
 │       └── mock_agent_client.py   # Shared mock client
 │
 └── core_v3/
-    └── tests/                      # V3 Web UI tests (37+ tests)
-        ├── conftest.py            # V3 fixtures
-        ├── test_agent_session.py  # Agent session tests
-        ├── test_web_server_v3.py  # Web server tests
-        ├── test_*_e2e.py          # E2E Playwright tests
-        └── test_*.py              # Other V3 tests
+    └── tests/                      # V3 Web UI tests (309 tests)
+        ├── conftest.py            # Shared fixtures (all test types)
+        ├── unit/                  # Unit tests (fast, parallel)
+        │   ├── conftest.py       # Unit test fixtures
+        │   └── test_*.py         # Unit tests
+        │
+        ├── integration/           # Integration tests (medium, parallel)
+        │   ├── conftest.py       # Integration fixtures
+        │   └── test_*.py         # Integration tests
+        │
+        ├── e2e/                   # E2E tests (slow, serial)
+        │   ├── conftest.py       # E2E fixtures (live_server)
+        │   └── test_*_e2e.py     # Playwright browser tests
+        │
+        └── fixtures/
+            ├── mock_agent_client.py
+            └── mcp_client.py
 ```
 
 ### Naming Conventions
@@ -176,15 +187,54 @@ bassi/
 
 ### Running Tests
 
+#### Recommended: Use `run-tests.sh` Script
+
+The `run-tests.sh` script is the **recommended way** to run tests by type:
+
 ```bash
-# Run all tests (V1 + V3, ~52 tests)
+# Run all unit tests (parallel)
+./run-tests.sh unit
+
+# Run all integration tests (parallel)
+./run-tests.sh integration
+
+# Run all E2E tests (serial - cannot run in parallel)
+./run-tests.sh e2e
+
+# Run all test types in sequence
+./run-tests.sh all
+
+# Run with verbose output
+./run-tests.sh unit -v
+./run-tests.sh e2e -v
+
+# Run specific test
+./run-tests.sh unit bassi/core_v3/tests/unit/test_message_converter.py::test_convert_user_message -v
+```
+
+**Why use this script?**
+- ✅ Automatically runs unit/integration tests in parallel (`-n auto`)
+- ✅ Automatically runs E2E tests serially (avoids port conflicts)
+- ✅ Clear separation by test type (unit, integration, e2e)
+- ✅ Consistent test execution across team
+
+#### Alternative: Direct pytest
+
+```bash
+# Run all tests (V1 + V3)
 uv run pytest
 
 # Run V1 tests only
 uv run pytest tests/
 
-# Run V3 tests only
-uv run pytest bassi/core_v3/tests/
+# Run V3 unit tests (parallel)
+uv run pytest bassi/core_v3/tests/unit/ -n auto
+
+# Run V3 integration tests (parallel)
+uv run pytest bassi/core_v3/tests/integration/ -n auto
+
+# Run V3 E2E tests (serial - no -n flag!)
+uv run pytest bassi/core_v3/tests/e2e/
 
 # Run specific test file
 uv run pytest tests/test_agent.py
@@ -195,15 +245,11 @@ uv run pytest tests/test_agent.py::test_agent_initialization -v
 # Run with coverage
 uv run pytest --cov=bassi
 
-# Run integration tests only (requires API keys)
-uv run pytest -m integration
-
-# Skip integration tests
-uv run pytest -m "not integration"
-
 # Watch mode (auto-rerun on changes)
 uv run pytest-watch
 ```
+
+**⚠️ CRITICAL**: Never use `-n auto` with E2E tests! E2E tests use a shared `live_server` fixture that binds to port 18765. Parallel execution will cause port conflicts.
 
 ---
 
@@ -241,11 +287,13 @@ async def test_async_function():
 
 ### Test Type Comparison
 
-| Type | Speed | Dependencies | Markers | Location |
-|------|-------|--------------|---------|----------|
-| **Unit** | Fast | None (mocks) | None | `tests/`, `core_v3/tests/` |
-| **Integration** | Medium | API keys, services | `@pytest.mark.integration` | Mixed |
-| **E2E** | Slow | Browser, server | `@pytest.mark.e2e` + `xdist_group` | `core_v3/tests/test_*_e2e.py` |
+| Type | Speed | Dependencies | Parallel | Location |
+|------|-------|--------------|----------|----------|
+| **Unit** | Fast (~100ms) | None (mocks) | ✅ Yes (`-n auto`) | `bassi/core_v3/tests/unit/` |
+| **Integration** | Medium (~1-5s) | File I/O, services | ✅ Yes (`-n auto`) | `bassi/core_v3/tests/integration/` |
+| **E2E** | Slow (~5-10s) | Browser, server | ❌ No (shared server) | `bassi/core_v3/tests/e2e/` |
+
+**Key difference**: E2E tests MUST run serially because they share a `live_server` fixture on port 18765.
 
 ---
 

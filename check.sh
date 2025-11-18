@@ -163,7 +163,7 @@ run_marker_filter() {
 run_unit_coverage() {
     echo ""
     echo "4. Running unit tests with coverage..."
-    echo "   • Scope: pytest -m \"not e2e\""
+    echo "   • Scope: pytest -m \"not e2e and not integration\""
     echo "   • Tooling: pytest-cov (tracks ALL source files)"
     echo "   • Config: .coveragerc (excludes tests, includes untested files)"
     echo ""
@@ -171,7 +171,7 @@ run_unit_coverage() {
     cleanup_servers
     rm -f .coverage .coverage.* 2>/dev/null || true
 
-    if ! uv run pytest -n auto -m "not e2e" --cov=bassi --cov-branch --cov-report=term-missing --tb=short; then
+    if ! uv run pytest -n auto -m "not e2e and not integration" --cov=bassi --cov-branch --cov-report=term-missing --tb=short; then
         echo ""
         echo "❌ Coverage run FAILED"
         exit 1
@@ -181,11 +181,11 @@ run_unit_coverage() {
 # Run coverage-enabled ALL tests (unit + E2E)
 run_all_coverage() {
     echo ""
-    echo "4. Running ALL tests with coverage (unit + E2E, ~3min)..."
-    echo "   • Scope: pytest (all tests including E2E)"
+    echo "4. Running ALL tests with coverage (unit + integration + E2E, ~3min)..."
+    echo "   • Scope: pytest (all tests including E2E and integration)"
     echo "   • Tooling: pytest-cov (tracks ALL source files)"
     echo "   • Config: .coveragerc (excludes tests, includes untested files)"
-    echo "   • Parallel unit tests + sequential E2E"
+    echo "   • Parallel unit tests + sequential integration + sequential E2E"
     echo "   ⚠️  This is slow - grab coffee!"
     echo ""
 
@@ -194,9 +194,19 @@ run_all_coverage() {
 
     # Run unit tests in parallel with coverage (pytest-cov handles parallel properly)
     echo "→ Running unit tests (parallel)..."
-    if ! uv run pytest -n auto -m "not e2e" --cov=bassi --cov-branch --cov-report= --tb=short; then
+    if ! uv run pytest -n auto -m "not e2e and not integration" --cov=bassi --cov-branch --cov-report= --tb=short; then
         echo ""
         echo "❌ Unit tests with coverage FAILED"
+        exit 1
+    fi
+
+    # Run integration tests sequentially, appending to coverage data
+    echo ""
+    echo "→ Running integration tests (sequential)..."
+    cleanup_servers
+    if ! uv run pytest -m integration --cov=bassi --cov-branch --cov-append --cov-report= --tb=short; then
+        echo ""
+        echo "❌ Integration tests with coverage FAILED"
         exit 1
     fi
 

@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-bassi = "bassi.main:main"
+bassi = "bassi.core_v3.cli:main"
 bassi-web = "bassi.core_v3.cli:main"
 
 [project.optional-dependencies]
@@ -64,27 +64,30 @@ disallow_incomplete_defs = false
 check_untyped_defs = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "bassi/core_v3/tests"]
+testpaths = ["bassi/core_v3/tests"]
 python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short"  # E2E tests require sequential execution (don't use -n auto)
-asyncio_mode = "auto"  # Fix event loop conflicts with pytest-asyncio
-asyncio_default_fixture_loop_scope = "function"  # Isolate event loops per test
+addopts = "-q -ra"
+
 markers = [
-    "integration: marks tests as integration tests (require API keys)",
-    "asyncio: marks tests as async",
-    "e2e: marks tests as end-to-end Playwright tests (run separately)",
+  "unit: fast, no IO",
+  "integration: uses asyncio/http server",
+  "e2e: uses Playwright/browser",
+  "xdist_group(name): serialized group name"
 ]
+
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
 filterwarnings = [
-    "ignore:websockets.legacy is deprecated:DeprecationWarning",
-    "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
-    "ignore:remove second argument of ws_handler:DeprecationWarning",
+  "ignore:websockets.legacy is deprecated:DeprecationWarning",
+  "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
+  "ignore:remove second argument of ws_handler:DeprecationWarning",
 ]
 
 [dependency-groups]
 dev = [
     "pexpect>=4.9.0",
+    "pytest-asyncio>=1.2.0",
     "pytest-playwright>=0.7.1",
     "pytest-xdist>=3.8.0",
 ]

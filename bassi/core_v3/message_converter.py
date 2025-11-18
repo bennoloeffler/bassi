@@ -86,8 +86,14 @@ def _convert_content_block(block: ContentBlock) -> dict[str, Any] | None:
         Web UI event dictionary or None if block type is unknown
     """
     if isinstance(block, TextBlock):
+        # Generate a unique ID for the text block (frontend requires msg.id)
+        # Use first 12 chars of text as ID (or "text_block" if empty)
+        block_id = (
+            block.text[:12].replace(" ", "_") if block.text else "text_block"
+        )
         return {
             "type": "text_delta",
+            "id": f"text_{block_id}",  # Add unique ID for frontend tracking
             "text": block.text,
         }
     elif isinstance(block, ToolUseBlock):

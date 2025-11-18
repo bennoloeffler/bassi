@@ -62,8 +62,28 @@ Generate ONLY the session name (no quotes, no explanation, just the kebab-case n
         Args:
             config: Application config (defaults to Config())
         """
+        import os
+
         self.config = config or Config()
-        self.client = Anthropic(api_key=self.config.anthropic_api_key)
+
+        # Get API key from config or environment
+        api_key = self.config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+
+        # Only create client if API key is available (test environments may not have one)
+        try:
+            if api_key:
+                self.client = Anthropic(api_key=api_key)
+                logger.debug("✅ SessionNamingService initialized with API key")
+            else:
+                self.client = None
+                logger.warning(
+                    "⚠️  No Anthropic API key - session naming will use fallback names"
+                )
+        except Exception as e:
+            self.client = None
+            logger.warning(
+                f"⚠️  Failed to create Anthropic client: {e} - using fallback names"
+            )
 
     async def generate_session_name(
         self, user_message: str, assistant_response: str
@@ -81,6 +101,11 @@ Generate ONLY the session name (no quotes, no explanation, just the kebab-case n
         Raises:
             Exception: If API call fails
         """
+        # If no client available (no API key), use fallback immediately
+        if self.client is None:
+            logger.debug("🏷️  No API client - using fallback name")
+            return self._generate_fallback_name(user_message)
+
         try:
             # Truncate messages to avoid excessive token usage
             user_truncated = self._truncate_message(user_message, 500)

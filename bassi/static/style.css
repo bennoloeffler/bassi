@@ -1950,9 +1950,9 @@ body.hide-thinking .thinking-block {
 }
 
 .new-session-button:hover {
-    background: var(--accent-blue-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow);
+    background: var(--accent-cyan);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
 }
 
 .new-session-button:active {
@@ -3238,6 +3238,64 @@ code.cap-name {
     font-size: 1rem;
 }
 
+/* ========== Permission Dialogs ========== */
+
+.permission-dialog {
+    background: var(--bg-elevated);
+    border: 2px solid var(--accent-yellow);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+    margin: var(--spacing-md) 0;
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+}
+
+.permission-header {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    margin-bottom: var(--spacing-sm);
+}
+
+.permission-message-text {
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    line-height: 1.5;
+}
+
+.permission-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.permission-option {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    padding: var(--spacing-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: left;
+}
+
+.permission-option:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-blue);
+    transform: scale(1.02);
+}
+
+.permission-option .option-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    margin-bottom: var(--spacing-xs);
+}
+
+.permission-option .option-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
 /* ========== Dynamic Help Styles ========== */
 
 .help-content {
@@ -3735,4 +3793,34 @@ details[open] .tools-grid {
     background: #c53030;
     transform: scale(1.15);
     box-shadow: var(--shadow-lg);
+}
+
+/* ========== Settings - Warning Text ========== */
+.warning-text {
+    color: var(--accent-yellow);
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+/* ========== Notification Toast ========== */
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
 }

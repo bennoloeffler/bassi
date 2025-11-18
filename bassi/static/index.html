@@ -162,6 +162,7 @@
                 <button class="modal-close" id="settings-close">×</button>
             </div>
             <div class="modal-body">
+                <!-- Thinking Process Toggle -->
                 <div class="setting-item">
                     <div class="setting-info">
                         <label class="setting-label">Show Thinking Process</label>
@@ -171,6 +172,22 @@
                     </div>
                     <label class="toggle-switch">
                         <input type="checkbox" id="thinking-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <!-- Global Bypass Toggle -->
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label class="setting-label">Allow All Tools Always</label>
+                        <p class="setting-description">
+                            Skip permission prompts - agent can use any tool autonomously (bash, web search, file operations, etc.)
+                            <br>
+                            <span class="warning-text">⚠️ Only enable if you trust the agent completely</span>
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="global-bypass-toggle" checked>
                         <span class="toggle-slider"></span>
                     </label>
                 </div>

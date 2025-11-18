@@ -4,6 +4,10 @@
 
 Successfully migrated verbose levels from DOM manipulation to CSS-based visibility control, fixing critical "Tool panel not found" errors in Minimal mode.
 
+## Concept
+
+Use CSS classes to control visibility of tool details based on verbose level setting. Always render all content, just hide via CSS. This ensures all DOM elements exist, preventing JavaScript errors when trying to update them later.
+
 ## Problem Solved
 
 ### Original Issue

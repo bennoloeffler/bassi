@@ -47,11 +47,16 @@ Successfully implemented Claude Code's `AskUserQuestion` functionality for Bassi
 
 ### 3. Documentation
 - `docs/features_concepts/interactive_questions.md` - Feature guide
-- `docs/INTERACTIVE_QUESTIONS_IMPLEMENTATION.md` - Original implementation doc
-- `docs/INTERACTIVE_QUESTIONS_DEBUG.md` - Debugging guide
-- `docs/INTERACTIVE_QUESTIONS_COMPLETE.md` - This document
+- `docs/INTERACTIVE_QUESTIONS_IMPLEMENTATION.md` - Original implementation doc (archived)
+- `docs/INTERACTIVE_QUESTIONS_DEBUG.md` - Debugging session notes (archived)
 
-## The Critical Bug and Fix
+## Debugging Notes
+
+During implementation, a critical deadlock issue was discovered and fixed:
+
+**Problem**: The WebSocket handler was synchronous, causing a deadlock when the agent called `AskUserQuestion` tool. The tool would wait for user input, but the WebSocket couldn't receive the answer because it was blocked inside `_process_message()`.
+
+**Solution**: Implemented concurrent message processing using `asyncio.create_task()` to allow the WebSocket to receive answers while the agent query is processing. This enables the tool to complete and return answers to the agent.
 
 ### The Bug
 The feature was fully implemented but **completely non-functional** due to a simple missing import:
