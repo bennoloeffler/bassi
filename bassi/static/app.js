@@ -89,6 +89,11 @@ class BassiWebClient {
         this.allSessions = []  // All sessions from API
         this.filteredSessions = []  // Sessions after search filter
 
+        // Connection count indicator
+        this.connectionCountEl = document.getElementById('connection-count-value')
+        this.connectionCountContainer = document.getElementById('connection-count')
+        this.connectionCountInterval = null
+
         this.init()
     }
 
@@ -179,6 +184,45 @@ class BassiWebClient {
 
         // Connect WebSocket
         this.connect()
+
+        // Start connection count polling
+        this.startConnectionCountPolling()
+    }
+
+    // ========== Connection Count Indicator ==========
+
+    startConnectionCountPolling() {
+        // Poll every 3 seconds
+        this.connectionCountInterval = setInterval(() => {
+            this.updateConnectionCount()
+        }, 3000)
+
+        // Initial fetch
+        this.updateConnectionCount()
+    }
+
+    async updateConnectionCount() {
+        try {
+            const response = await fetch('/health')
+            const data = await response.json()
+
+            const count = data.active_connections || 0
+
+            if (this.connectionCountEl) {
+                this.connectionCountEl.textContent = count
+
+                // Update styling for multiple connections
+                if (this.connectionCountContainer) {
+                    if (count > 1) {
+                        this.connectionCountContainer.classList.add('multiple')
+                    } else {
+                        this.connectionCountContainer.classList.remove('multiple')
+                    }
+                }
+            }
+        } catch (error) {
+            // Silent fail - don't spam console
+        }
     }
 
     // ========== Session File Management ==========
@@ -997,6 +1041,9 @@ class BassiWebClient {
         }))
 
         console.log(`📤 Sent ${messageType}:`, contentBlocks.length === 1 ? 'text-only' : `${contentBlocks.length} blocks`)
+
+        // Close session sidebar when starting chat
+        this.closeSessionSidebar()
 
         // Clear input and reset height (but keep files attached)
         this.messageInput.value = ''
@@ -3717,15 +3764,33 @@ class BassiWebClient {
          * Toggle session sidebar open/close state.
          */
         this.sessionSidebarOpen = !this.sessionSidebarOpen
+        this.updateSessionSidebarState()
+    }
 
+    closeSessionSidebar() {
+        /**
+         * Close session sidebar if open.
+         */
+        if (this.sessionSidebarOpen) {
+            this.sessionSidebarOpen = false
+            this.updateSessionSidebarState()
+        }
+    }
+
+    updateSessionSidebarState() {
+        /**
+         * Update sidebar UI based on open/close state.
+         */
         if (this.sessionSidebarOpen) {
             this.sessionSidebar.classList.add('open')
             this.sessionSidebarToggle.classList.add('open')
+            document.body.classList.add('sidebar-open')
             // Reload sessions when opening
             this.loadSessions()
         } else {
             this.sessionSidebar.classList.remove('open')
             this.sessionSidebarToggle.classList.remove('open')
+            document.body.classList.remove('sidebar-open')
         }
     }
 

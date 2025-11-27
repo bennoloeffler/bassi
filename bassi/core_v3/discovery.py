@@ -28,6 +28,31 @@ class BassiDiscovery:
         """
         self.project_root = project_root or Path.cwd()
 
+    def _classify_source(self, item_path: Path) -> str:
+        """
+        Determine whether a path belongs to project, personal, or custom source.
+        """
+        project_root = self.project_root.resolve()
+        home_dir = Path.home().resolve()
+        try:
+            resolved = item_path.resolve()
+        except Exception:
+            resolved = item_path
+
+        try:
+            if resolved.is_relative_to(project_root):
+                return "project"
+            if resolved.is_relative_to(home_dir):
+                return "personal"
+        except AttributeError:
+            resolved_str = str(resolved)
+            if str(project_root) in resolved_str:
+                return "project"
+            if str(home_dir) in resolved_str:
+                return "personal"
+
+        return "custom"
+
     def discover_slash_commands(self) -> dict[str, list[dict[str, Any]]]:
         """
         Discover slash commands by scanning filesystem.
@@ -128,6 +153,77 @@ class BassiDiscovery:
 
         return skills
 
+    def discover_agents(
+        self, agent_dirs: list[Path] | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Discover available agents by scanning configured directories.
+
+        Args:
+            agent_dirs: Optional list of directories to scan
+
+        Returns:
+            List of discovered agents with metadata
+        """
+        if agent_dirs is None:
+            agent_dirs = [
+                self.project_root / ".claude" / "agents",
+                Path.home() / ".claude" / "agents",
+            ]
+
+        agents = []
+
+        for agent_dir in agent_dirs:
+            if not agent_dir.exists():
+                continue
+
+            for agent_file in agent_dir.glob("*.md"):
+                agents.append(
+                    {
+                        "name": agent_file.stem,
+                        "file": str(agent_file),
+                        "source": self._classify_source(agent_file),
+                    }
+                )
+
+        return agents
+
+    def discover_hooks(
+        self, hook_dirs: list[Path] | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Discover hook scripts defined under .claude/hooks directories.
+
+        Args:
+            hook_dirs: Optional list of directories to scan.
+
+        Returns:
+            List of hook metadata dictionaries.
+        """
+        if hook_dirs is None:
+            hook_dirs = [
+                self.project_root / ".claude" / "hooks",
+                Path.home() / ".claude" / "hooks",
+            ]
+
+        hooks: list[dict[str, Any]] = []
+        for hook_dir in hook_dirs:
+            if not hook_dir.exists():
+                continue
+
+            for hook_file in hook_dir.rglob("*"):
+                if not hook_file.is_file():
+                    continue
+                hooks.append(
+                    {
+                        "name": hook_file.stem,
+                        "file": str(hook_file),
+                        "source": self._classify_source(hook_file),
+                    }
+                )
+
+        return hooks
+
     def get_summary(self) -> dict[str, Any]:
         """
         Get a complete summary of all discoverable capabilities.
@@ -139,6 +235,8 @@ class BassiDiscovery:
             "slash_commands": self.discover_slash_commands(),
             "mcp_servers": self.discover_mcp_servers(),
             "skills": self.discover_skills(),
+            "agents": self.discover_agents(),
+            "hooks": self.discover_hooks(),
         }
 
     def format_summary(self, summary: dict[str, Any] | None = None) -> str:
@@ -214,6 +312,30 @@ class BassiDiscovery:
             for skill in skills:
                 lines.append(f"   • {skill['name']}")
                 lines.append(f"     Path: {skill['path']}")
+        else:
+            lines.append("   (none found)")
+
+        # Hooks
+        hooks = summary.get("hooks", [])
+        lines.append(f"\n🪝 HOOKS: {len(hooks)}")
+        if hooks:
+            for hook in hooks:
+                lines.append(f"   • {hook['name']}")
+                if "source" in hook:
+                    lines.append(f"     Source: {hook['source']}")
+                lines.append(f"     File: {hook['file']}")
+        else:
+            lines.append("   (none found)")
+
+        # Agents
+        agents = summary.get("agents", [])
+        lines.append(f"\n🤖 AGENTS: {len(agents)}")
+        if agents:
+            for agent in agents:
+                lines.append(f"   • {agent['name']}")
+                if "source" in agent:
+                    lines.append(f"     Source: {agent['source']}")
+                lines.append(f"     File: {agent['file']}")
         else:
             lines.append("   (none found)")
 

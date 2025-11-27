@@ -70,9 +70,9 @@ class WebUIServerV3:
 
         # Convert to Path for internal use
         self.workspace_base_path = Path(workspace_base_path)
-        self.session_factory = (
-            session_factory or self._default_session_factory
-        )
+        if session_factory is None:
+            session_factory = create_default_session_factory()
+        self.session_factory = session_factory
 
         # Single agent instance (replaces pool)
         self.single_agent: Optional[BassiAgentSession] = None
@@ -196,23 +196,6 @@ class WebUIServerV3:
         await session.connect()
         logger.info("✅ Single agent connected to SDK")
 
-        return session
-
-    def _default_session_factory(self, question_service, workspace):
-        """
-        Default factory for creating agent sessions.
-        
-        This is called by capability_service to get capabilities.
-        Creates a minimal session for capability detection.
-        """
-        from bassi.core_v3.agent_session import SessionConfig
-        
-        # Create minimal config for capability detection
-        config = SessionConfig(
-            permission_mode="bypassPermissions",
-        )
-        session = BassiAgentSession(config)
-        session.workspace = workspace
         return session
 
     def _create_app(self) -> FastAPI:

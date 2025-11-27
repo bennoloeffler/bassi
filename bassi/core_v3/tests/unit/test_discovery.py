@@ -44,6 +44,17 @@ def tmp_project(tmp_path):
     # Create a file (not directory) - should be ignored
     (skills_dir / "not-a-skill.md").write_text("# Not a skill")
 
+    # Create hooks directory with scripts
+    hooks_dir = tmp_path / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "security.py").write_text("# Hook script")
+    (hooks_dir / "analytics.py").write_text("# Another hook")
+
+    # Create agents directory
+    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "writer-agent.md").write_text("# Writer Agent")
+
     return tmp_path
 
 
@@ -64,6 +75,11 @@ def tmp_personal(tmp_path_factory):
     skill = skills_dir / "personal-skill"
     skill.mkdir()
     (skill / "SKILL.md").write_text("# Personal Skill")
+
+    # Create personal agent
+    agents_dir = personal_dir / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "personal-agent.md").write_text("# Personal Agent")
 
     return personal_dir
 
@@ -227,6 +243,26 @@ class TestBassiDiscovery:
 
         # Check skills
         assert len(summary["skills"]) >= 1
+        # Check agents
+        assert len(summary["agents"]) >= 1
+
+    def test_discover_agents_project(self, tmp_project):
+        """Test discovering agents within the project."""
+        discovery = BassiDiscovery(tmp_project)
+        agent_dir = tmp_project / ".claude" / "agents"
+        agents = discovery.discover_agents([agent_dir])
+
+        assert len(agents) == 1
+        agent = agents[0]
+        assert agent["name"] == "writer-agent"
+        assert agent["source"] == "project"
+        assert agent["file"].endswith("writer-agent.md")
+
+    def test_discover_agents_handles_missing_dir(self, tmp_path):
+        """Test discovering agents when directory missing."""
+        discovery = BassiDiscovery(tmp_path)
+        agents = discovery.discover_agents([tmp_path / "nope"])
+        assert agents == []
 
     def test_format_summary_with_all_items(self, tmp_project):
         """Test formatting summary with all types of items."""
@@ -239,6 +275,7 @@ class TestBassiDiscovery:
         assert "MCP SERVERS:" in formatted
         assert "SLASH COMMANDS:" in formatted
         assert "SKILLS:" in formatted
+        assert "AGENTS:" in formatted
 
         # Check for specific items
         assert "test-server" in formatted
@@ -246,18 +283,21 @@ class TestBassiDiscovery:
         assert "/test-cmd" in formatted
         assert "/another-cmd" in formatted
         assert "skill-one" in formatted
+        assert "writer-agent" in formatted
 
         # Check for package info (npx command)
         assert "Package: test-package" in formatted
 
-    def test_format_summary_with_no_items(self, tmp_path):
+    def test_format_summary_with_no_items(self, tmp_path, monkeypatch):
         """Test formatting summary when no project items are found."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         discovery = BassiDiscovery(tmp_path)
         summary = discovery.get_summary()
         formatted = discovery.format_summary(summary)
 
-        # Should show "(none configured)" for MCP servers
+        # Should show "(none configured)" for MCP servers and agents
         assert "MCP SERVERS: 0" in formatted
+        assert "AGENTS: 0" in formatted
         assert "(none configured)" in formatted
 
         # Skills should be 0 (no project or personal skills in tmp_path)

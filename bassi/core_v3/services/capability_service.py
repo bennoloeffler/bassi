@@ -72,16 +72,20 @@ class CapabilityService:
 
             # Get SDK tools and agents via temporary session
             tools = []
-            agents = []
+            agents = summary.get("agents", [])
 
             temp_service = InteractiveQuestionService()
             temp_workspace = SessionWorkspace(
                 "capabilities-discovery", create=True
             )
+            logger.info("🔧 Creating temp session for capability discovery...")
             temp_session = self.session_factory(temp_service, temp_workspace)
+            logger.info(f"🔧 Temp session created: {type(temp_session).__name__}")
 
             try:
+                logger.info("🔗 Connecting temp session...")
                 await temp_session.connect()
+                logger.info("✅ Temp session connected")
 
                 # Send a minimal query to trigger tool discovery
                 tools_found = []
@@ -90,11 +94,21 @@ class CapabilityService:
                 async for message in temp_session.query(
                     "ready", session_id="capabilities-discovery"
                 ):
-                    # Extract tool names from system message
+                    msg_type = type(message).__name__
+                    logger.info(f"📨 Capability discovery - received: {msg_type}")
+
+                    # Extract tool names from system message with 'init' subtype
                     if isinstance(message, SystemMessage):
                         logger.info(
                             f"✅ Found SystemMessage with subtype: {message.subtype}"
                         )
+                        logger.debug(
+                            f"   Data keys: {list(message.data.keys()) if isinstance(message.data, dict) else 'not a dict'}"
+                        )
+
+                        # Only process 'init' subtype which contains tools/capabilities
+                        if message.subtype != "init":
+                            continue
 
                         # Extract data from SystemMessage.data
                         if isinstance(message.data, dict):
@@ -134,9 +148,15 @@ class CapabilityService:
 
                         break  # Stop after getting system message
 
-                logger.info(
-                    f"✅ Tool discovery complete. Found {len(tools_found)} tools"
-                )
+                if tools_found:
+                    logger.info(
+                        f"✅ Tool discovery complete. Found {len(tools_found)} tools"
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ Tool discovery completed but no tools found! "
+                        "Check if SDK returned 'init' SystemMessage with tools."
+                    )
                 tools = tools_found
 
                 await temp_session.disconnect()

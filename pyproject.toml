@@ -84,6 +84,9 @@ filterwarnings = [
   "ignore:remove second argument of ws_handler:DeprecationWarning",
 ]
 
+[tool.uv.workspace]
+members = ["yue-claude-test"]
+
 [dependency-groups]
 dev = [
     "pexpect>=4.9.0",

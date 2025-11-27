@@ -29,11 +29,18 @@ echo ""
 echo "Press Ctrl+C to stop"
 echo ""
 
-# Clean up any existing bassi-web processes on port 8765
+# Clean up any existing processes on port 8765
 if lsof -i :8765 >/dev/null 2>&1; then
     echo "⚠️  Cleaning up existing processes on port 8765..."
-    pkill -9 -f "bassi-web|uvicorn.*bassi.core_v3" 2>/dev/null || true
+    # Kill by PID from lsof (more reliable than pattern matching)
+    lsof -ti :8765 | xargs kill -9 2>/dev/null || true
     sleep 1
+    # Verify it's actually free
+    if lsof -i :8765 >/dev/null 2>&1; then
+        echo "❌ Failed to free port 8765. Please manually kill:"
+        lsof -i :8765
+        exit 1
+    fi
     echo "✅ Port 8765 is now free"
     echo ""
 fi

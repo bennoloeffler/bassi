@@ -1,5 +1,9 @@
-# CRM Command
+---
+description: You are a CRM data insertion, update and extraction assistant.
+skill: crm-db
+---
 
+# CRM Command
 You are a CRM data extraction and management assistant.
 
 ## Your Task

@@ -79,6 +79,19 @@ body {
     padding-right: env(safe-area-inset-right);
 }
 
+/* Main content wrapper - shifts when sidebar opens */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    transition: margin-left var(--transition-normal);
+}
+
+body.sidebar-open .main-content {
+    margin-left: 300px;
+}
+
 /* ========== Layout ========== */
 .header {
     position: sticky;
@@ -163,6 +176,35 @@ body {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
+}
+
+/* ========== Connection Count Indicator ========== */
+.connection-count {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all var(--transition-fast);
+}
+
+.connection-count .count-icon {
+    font-size: 0.75rem;
+}
+
+.connection-count .count-value {
+    font-weight: 600;
+    min-width: 14px;
+    text-align: center;
+}
+
+.connection-count.multiple {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
 }
 
 /* ========== Settings Button ========== */
@@ -1893,17 +1935,16 @@ body.hide-thinking .thinking-block {
 }
 
 .session-sidebar-toggle.open {
-    left: 316px; /* 300px sidebar + 16px spacing */
+    /* Button stays in place - body shifts with sidebar */
 }
 
 .session-sidebar-toggle-icon {
-    font-size: 1.2rem;
     color: var(--text-secondary);
-    transition: transform var(--transition-fast);
+    transition: transform var(--transition-normal);
 }
 
 .session-sidebar-toggle.open .session-sidebar-toggle-icon {
-    transform: rotate(90deg);
+    transform: rotate(180deg);
 }
 
 /* Scrollbar for session list */
@@ -1968,14 +2009,15 @@ body.hide-thinking .thinking-block {
     line-height: 1.6;
 }
 
-/* Responsive - hide sidebar on mobile */
+/* Responsive - overlay sidebar on mobile instead of push */
 @media (max-width: 768px) {
     .session-sidebar {
         width: 250px;
     }
 
-    .session-sidebar-toggle.open {
-        left: 266px; /* 250px sidebar + 16px spacing */
+    /* On mobile, sidebar overlays - no content margin shift */
+    body.sidebar-open .main-content {
+        margin-left: 0;
     }
 }
 

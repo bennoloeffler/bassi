@@ -40,9 +40,31 @@ class AutoRespondingMockAgentClient(MockAgentClient):
 
         # Auto-generate a simple response if none was queued
         if not self._active_stream:
-            from bassi.shared.sdk_types import AssistantMessage, TextBlock
+            from bassi.shared.sdk_types import (
+                AssistantMessage,
+                SystemMessage,
+                TextBlock,
+            )
 
-            # Simple mock response wrapped in AssistantMessage (SDK format)
+            # First, send SystemMessage with 'init' subtype containing tools
+            # This is what the real SDK sends at the start of a conversation
+            init_msg = SystemMessage(
+                subtype="init",
+                data={
+                    "tools": [
+                        {"name": "bash"},
+                        {"name": "read"},
+                        {"name": "write"},
+                        {"name": "mcp__bassi-interactive__ask_user_question"},
+                    ],
+                    "agents": ["mock-agent"],
+                    "slash_commands": ["/help", "/clear"],
+                    "skills": ["mock-skill"],
+                },
+            )
+            self._active_stream.append(init_msg)
+
+            # Then send the actual response
             response_text = "Mock agent response"
             text_block = TextBlock(text=response_text)
             assistant_msg = AssistantMessage(

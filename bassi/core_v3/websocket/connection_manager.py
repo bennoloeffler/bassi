@@ -94,32 +94,12 @@ class ConnectionManager:
             requested_session_id
         )
 
-        # 2. Disconnect any existing connections (single client only!)
-        if len(self.active_connections) > 0:
-            logger.info(
-                f"⚠️ [WS] Disconnecting {len(self.active_connections)} existing connection(s)..."
-            )
-            for old_ws in self.active_connections[:]:  # Copy list to avoid mutation issues
-                try:
-                    await old_ws.send_json(
-                        {
-                            "type": "error",
-                            "message": "🔌 New client connected - disconnecting this session",
-                        }
-                    )
-                    await old_ws.close()
-                except Exception as e:
-                    logger.warning(f"Failed to disconnect old client: {e}")
-
-            # Clear all connections
-            self.active_connections.clear()
-            logger.info("✅ [WS] Old connections cleared")
-
-        # 3. Accept WebSocket IMMEDIATELY to prevent client timeout
+        # 2. Accept WebSocket IMMEDIATELY to prevent client timeout
+        # NOTE: Multiple connections are now allowed to coexist
         logger.info("🔷 [WS] Accepting WebSocket connection...")
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info("🔷 [WS] WebSocket accepted")
+        logger.info(f"🔷 [WS] WebSocket accepted. Total connections: {len(self.active_connections)}")
 
         # Set websocket on permission_manager for sending permission requests
         if self.permission_manager:
