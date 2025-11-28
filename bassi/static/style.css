@@ -207,6 +207,62 @@ body.sidebar-open .main-content {
     border-color: rgba(59, 130, 246, 0.4);
 }
 
+/* ========== Settings Status Icons ========== */
+.settings-icons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.settings-icon-button {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+}
+
+.settings-icon-button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-purple);
+    transform: scale(1.05);
+}
+
+/* Brain icon - active when thinking is shown */
+.settings-icon-button#thinking-icon.active {
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    background: rgba(168, 85, 247, 0.1);
+}
+
+.settings-icon-button#thinking-icon.active svg {
+    fill: rgba(168, 85, 247, 0.3);
+}
+
+/* Lock icon - unlocked (green) when permissions bypassed */
+.settings-icon-button#permissions-icon.unlocked {
+    color: var(--accent-green);
+    border-color: var(--accent-green);
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.settings-icon-button#permissions-icon.unlocked .lock-closed {
+    display: none;
+}
+
+.settings-icon-button#permissions-icon.unlocked .lock-open {
+    display: block !important;
+}
+
+.settings-icon-button#permissions-icon:not(.unlocked) .lock-open {
+    display: none;
+}
+
 /* ========== Settings Button ========== */
 .settings-button {
     background: transparent;

@@ -377,26 +377,40 @@ class BassiWebClient {
         const settingsClose = document.getElementById('settings-close')
         const thinkingToggle = document.getElementById('thinking-toggle')
         const globalBypassToggle = document.getElementById('global-bypass-toggle')
+        const thinkingIcon = document.getElementById('thinking-icon')
+        const permissionsIcon = document.getElementById('permissions-icon')
 
         // Load thinking preference from localStorage
         const showThinking = localStorage.getItem('showThinking')
         if (showThinking === 'false') {
             thinkingToggle.checked = false
             document.body.classList.add('hide-thinking')
+            this.updateThinkingIcon(false)
         } else {
             // Default to true
             thinkingToggle.checked = true
             document.body.classList.remove('hide-thinking')
+            this.updateThinkingIcon(true)
         }
 
         // Load global bypass setting from backend
         this.loadGlobalBypassSetting()
 
-        // Open settings modal
+        // Open settings modal (from gear button or status icons)
+        const openSettingsModal = () => {
+            settingsModal.style.display = 'flex'
+        }
+
         if (settingsButton) {
-            settingsButton.addEventListener('click', () => {
-                settingsModal.style.display = 'flex'
-            })
+            settingsButton.addEventListener('click', openSettingsModal)
+        }
+
+        // Status icons also open settings modal
+        if (thinkingIcon) {
+            thinkingIcon.addEventListener('click', openSettingsModal)
+        }
+        if (permissionsIcon) {
+            permissionsIcon.addEventListener('click', openSettingsModal)
         }
 
         // Close settings modal
@@ -439,6 +453,9 @@ class BassiWebClient {
                     console.log('❌ Thinking blocks disabled')
                 }
 
+                // Update the status icon
+                this.updateThinkingIcon(showThinking)
+
                 // Send config change to backend
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({
@@ -459,6 +476,34 @@ class BassiWebClient {
         }
     }
 
+    // Update thinking icon state (brain icon)
+    updateThinkingIcon(enabled) {
+        const thinkingIcon = document.getElementById('thinking-icon')
+        if (thinkingIcon) {
+            if (enabled) {
+                thinkingIcon.classList.add('active')
+                thinkingIcon.title = 'Show Thinking Process: ON'
+            } else {
+                thinkingIcon.classList.remove('active')
+                thinkingIcon.title = 'Show Thinking Process: OFF'
+            }
+        }
+    }
+
+    // Update permissions icon state (lock icon)
+    updatePermissionsIcon(unlocked) {
+        const permissionsIcon = document.getElementById('permissions-icon')
+        if (permissionsIcon) {
+            if (unlocked) {
+                permissionsIcon.classList.add('unlocked')
+                permissionsIcon.title = 'Allow All Tools: ON (unlocked)'
+            } else {
+                permissionsIcon.classList.remove('unlocked')
+                permissionsIcon.title = 'Allow All Tools: OFF (locked)'
+            }
+        }
+    }
+
     async loadGlobalBypassSetting() {
         // Load global bypass setting from backend
         try {
@@ -470,6 +515,8 @@ class BassiWebClient {
                     toggle.checked = data.enabled
                     console.log(`🔐 Global bypass loaded: ${data.enabled}`)
                 }
+                // Update the permissions icon
+                this.updatePermissionsIcon(data.enabled)
             }
         } catch (error) {
             console.error('Failed to load global bypass setting:', error)
@@ -488,6 +535,9 @@ class BassiWebClient {
             })
 
             if (response.ok) {
+                // Update the permissions icon
+                this.updatePermissionsIcon(enabled)
+
                 // Notify WebSocket to update agent permission mode
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({
