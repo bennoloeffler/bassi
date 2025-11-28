@@ -79,17 +79,18 @@ class WebUIServerV3:
         self._is_custom_session_factory = session_factory is not None
         self.pool_size = pool_size
 
-        # Use custom factory or create default pool factory
-        if session_factory:
-            self.agent_factory = self._wrap_legacy_factory(session_factory)
-        else:
-            self.agent_factory = create_pool_agent_factory()
-
-        # Initialize services
+        # Initialize services FIRST (permission_manager needed for agent factory)
         self.chat_index = ChatIndex(self.workspace_base_path)
         self.upload_service = UploadService()
         self.config_service = ConfigService()
         self.permission_manager = PermissionManager(self.config_service)
+
+        # Use custom factory or create default pool factory
+        # NOTE: permission_manager must be created BEFORE agent factory
+        if session_factory:
+            self.agent_factory = self._wrap_legacy_factory(session_factory)
+        else:
+            self.agent_factory = create_pool_agent_factory(self.permission_manager)
         self.capability_service = CapabilityService(
             self._create_capability_factory()
         )
@@ -350,12 +351,18 @@ class WebUIServerV3:
             await server.serve()
 
 
-def create_pool_agent_factory() -> Callable[[], BassiAgentSession]:
+def create_pool_agent_factory(
+    permission_manager: Optional[PermissionManager] = None,
+) -> Callable[[], BassiAgentSession]:
     """
     Create agent factory for the pool.
 
     Pool agents are created WITHOUT workspace/question_service.
     These are attached when the agent is acquired by a browser session.
+
+    Args:
+        permission_manager: Optional PermissionManager for can_use_tool callback.
+                          If provided, enables interactive permission handling.
     """
     from bassi.shared.mcp_registry import create_mcp_registry
     from bassi.shared.permission_config import get_permission_mode
@@ -375,6 +382,7 @@ def create_pool_agent_factory() -> Callable[[], BassiAgentSession]:
             permission_mode=permission_mode,
             mcp_servers=mcp_servers,
             setting_sources=["project", "local"],
+            can_use_tool=permission_manager.can_use_tool_callback if permission_manager else None,
         )
         return BassiAgentSession(config)
 
