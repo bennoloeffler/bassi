@@ -122,7 +122,8 @@ def create_file_router(
 
             # Metadata and system files to exclude from file list
             EXCLUDED_FILES = {
-                "session.json",  # SessionWorkspace metadata
+                "chat.json",  # ChatWorkspace metadata (new)
+                "session.json",  # SessionWorkspace metadata (legacy)
                 "session_metadata.json",  # Legacy name
                 "session_state.json",  # SessionService state
                 ".index.json",  # Session index

@@ -75,6 +75,14 @@ class ClaudeAgentClient:
     async def interrupt(self) -> None:
         await self.sdk_client.interrupt()
 
+    async def set_permission_mode(self, mode: str) -> None:
+        """Change permission mode during conversation.
+        
+        Args:
+            mode: 'default', 'acceptEdits', or 'bypassPermissions'
+        """
+        await self.sdk_client.set_permission_mode(mode)
+
     async def get_server_info(self) -> Optional[dict[str, Any]]:
         return await self.sdk_client.get_server_info()
 

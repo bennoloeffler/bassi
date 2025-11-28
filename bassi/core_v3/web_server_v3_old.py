@@ -1185,7 +1185,9 @@ class WebUIServerV3:
             try:
                 # Stream response from agent session
                 # Pass content_blocks (supports both string and array)
-                async for message in session.query(content_blocks):
+                async for message in session.query(
+                    content_blocks, session_id=connection_id
+                ):
                     msg_type_name = type(message).__name__
                     print(f"📦 Got message: {msg_type_name}", flush=True)
 
@@ -1476,7 +1478,7 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                 # Stream response from agent (same pattern as user_message)
                 async for message in session.query(
                     prompt=formatted_hint,
-                    session_id=data.get("session_id", "default"),
+                    session_id=connection_id,
                 ):
                     # Convert SDK message to WebSocket events (returns list)
                     events = convert_message_to_websocket(message)
@@ -1689,6 +1691,27 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
             # Handle the permission response
             self.permission_manager.handle_permission_response(tool_name, scope)
+
+        elif msg_type == "permission_change":
+            # User changed global permission setting
+            bypass_enabled = data.get("bypass_permissions", False)
+            new_mode = "bypassPermissions" if bypass_enabled else "default"
+            logger.info(f"🔐 Permission change received: bypass={bypass_enabled}, mode={new_mode}")
+
+            try:
+                await session.set_permission_mode(new_mode)
+                await websocket.send_json({
+                    "type": "permission_updated",
+                    "mode": new_mode,
+                    "bypass_enabled": bypass_enabled,
+                })
+                logger.info(f"✅ Permission mode updated to: {new_mode}")
+            except Exception as e:
+                logger.error(f"❌ Failed to update permission mode: {e}", exc_info=True)
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Failed to update permission mode: {str(e)}",
+                })
 
         else:
             logger.warning(f"Unknown message type: {msg_type}")

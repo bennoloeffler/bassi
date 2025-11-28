@@ -112,8 +112,9 @@ def create_session_router(workspace_base_path: str | Path) -> APIRouter:
 
         try:
             # Load workspace to access conversation history
+            # Note: SessionWorkspace is alias for ChatWorkspace, uses chat_id param
             workspace = SessionWorkspace.load(
-                session_id=session_id, base_path=Path(workspace_base_path)
+                session_id, base_path=Path(workspace_base_path)
             )
 
             # Load conversation history from history.md

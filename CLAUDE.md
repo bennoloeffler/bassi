@@ -4,16 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview: Web-Only Application
 
-bassi is a **web-based AI assistant** powered by Claude Agent SDK.
+bassi is a **web-based AI assistant** powered by Claude Agent SDK with an **Agent Pool** architecture.
 
 ### Core System
 - **Entry Point**: `bassi` command (launches web server)
-- **Agent**: `bassi/core_v3/agent_session.py` (275 lines)
+- **Agent Pool**: 5 pre-connected agents (`bassi/core_v3/services/agent_pool.py`)
+- **Agent Session**: `bassi/core_v3/agent_session.py` (SDK wrapper)
 - **Purpose**: Interactive web UI with real-time streaming
-- **Features**: WebSocket streaming, interactive questions, startup discovery, hot reload
+- **Features**: WebSocket streaming, interactive questions, multiple concurrent browsers
 - **Tests**: `bassi/core_v3/tests/` (309 tests)
 
 **Architecture**: Modular web server using Black Box Design principles (see CLAUDE_BBS.md)
+
+### Key Terminology (IMPORTANT!)
+- **Browser Session** (`browser_id`): Ephemeral WebSocket connection from a browser tab
+- **Chat Context** (`chat_id`): Persistent conversation history + workspace files
+- **Agent**: Claude SDK client from the pool (pre-connected, reusable)
+
+A browser session acquires an agent from the pool and can switch between chat contexts.
+See `docs/features_concepts/chat_context_architecture.md` for details.
 
 ---
 
@@ -37,14 +46,22 @@ E.g.:
 ### Core Code
 - **`bassi/core_v3/`** - Web application architecture
   - `cli.py` - Entry point (launches web server)
-  - `agent_session.py` - Agent session (275 lines, thin SDK wrapper)
-  - `web_server_v3.py` - Web server coordination (300 lines)
+  - `agent_session.py` - Agent session (SDK wrapper)
+  - `web_server_v3.py` - Web server coordination with agent pool
+  - `chat_workspace.py` - Chat context storage (history, files)
+  - `chat_index.py` - Fast chat listing/search
   - `message_converter.py` - SDK message conversion
   - `tools.py` - Interactive questions
   - `discovery.py` - Startup discovery
-  - `routes/` - HTTP endpoint handlers (session, file, capability routes)
-  - `services/` - Business logic (session, capability services)
-  - `websocket/` - WebSocket connection and message handling
+  - `routes/` - HTTP endpoint handlers
+  - `services/` - Business logic
+    - `agent_pool.py` - Pool of 5 pre-connected agents
+    - `capability_service.py` - Tool/MCP discovery
+    - `permission_manager.py` - Tool permissions
+  - `websocket/` - Browser session management
+    - `browser_session_manager.py` - WebSocket ↔ Agent mapping
+  - `models/` - Data models
+    - `browser_session.py` - Browser connection state
   - `tests/` - Test suite (309 tests)
 - **`bassi/config.py`** - Configuration management
 - **`bassi/mcp_servers/`** - Built-in MCP servers (bash, web search, task automation)
@@ -159,17 +176,35 @@ BASSI_DEBUG=1 bassi
 
 ### Message Flow (Web UI)
 ```
-Browser (WebSocket)
+Browser Tab (WebSocket)
     ↕ WebSocket events (JSON)
-FastAPI Web Server (bassi/core_v3/web_server_v3.py)
-    ↕ SDK messages
-Message Converter (bassi/core_v3/message_converter.py)
+Browser Session Manager (websocket/browser_session_manager.py)
+    ↕ Acquire/Release
+Agent Pool (services/agent_pool.py) ← 5 pre-connected agents
+    ↕ Selected Agent
+Message Converter (message_converter.py)
     ↕ StreamEvent objects
-Agent Session (bassi/core_v3/agent_session.py)
+Agent Session (agent_session.py)
     ↕ Claude Agent SDK client
 Claude Agent SDK
     ↕ Anthropic API
 Claude Sonnet 4.5
+```
+
+### Browser → Chat Context Flow
+```
+Browser connects → acquire agent from pool
+               → load/create ChatWorkspace
+               → restore conversation history (if resuming)
+               → ready for messages
+
+Browser switches chat → save current context
+                     → reset agent state
+                     → load new ChatWorkspace
+                     → restore new history
+
+Browser disconnects → release agent to pool
+                   → agent stays connected (reusable)
 ```
 
 ### Key Architectural Patterns
@@ -179,21 +214,29 @@ Claude Sonnet 4.5
    - Implementation details hidden behind APIs
    - Focus on "what" not "how"
 
-2. **Modular Web Server Architecture**
+2. **Agent Pool Architecture**
+   - **Pool**: 5 pre-connected agents (`services/agent_pool.py`)
+   - **Browser connect** → acquire agent from pool (instant)
+   - **Browser disconnect** → release agent back to pool
+   - **Chat switch** → reset agent state, load new context
+   - First agent ready immediately, rest warm up async
+
+3. **Modular Web Server Architecture**
    - **routes/**: HTTP endpoint handlers (session, file, capability)
    - **services/**: Business logic (stateless, dependency injection)
-   - **websocket/**: Connection lifecycle and message handling
-   - **web_server_v3.py**: Coordination layer only (~300 lines)
+   - **websocket/**: Browser session management (`browser_session_manager.py`)
+   - **web_server_v3.py**: Coordination layer only
 
-3. **Message Conversion**
+4. **Message Conversion**
    - SDK → WebSocket: `convert_sdk_message_to_event()`
    - WebSocket → SDK: Direct JSON to SDK objects
    - Handles streaming, tool calls, questions
 
-4. **Session Isolation**
-   - Each WebSocket = separate agent instance
-   - No shared state between connections
-   - Clean lifecycle management
+5. **Chat Context Management**
+   - `ChatWorkspace`: Persistent storage (history, files, metadata)
+   - `ChatIndex`: Fast listing/search of all chats
+   - Browser can switch between chat contexts
+   - Agent state reset on context switch
 
 ### MCP Server Integration
 

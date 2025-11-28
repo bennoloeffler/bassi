@@ -49,16 +49,19 @@ class SessionService:
             return sessions
 
         # Collect all session directories
-        # Note: SessionWorkspace creates "session.json" (metadata file)
+        # Note: ChatWorkspace uses "chat.json", old SessionWorkspace used "session.json"
         session_dirs = [
             d
             for d in workspace_dir.iterdir()
-            if d.is_dir() and (d / "session.json").exists()
+            if d.is_dir() and ((d / "chat.json").exists() or (d / "session.json").exists())
         ]
 
         # Load metadata for each session
         for session_dir in session_dirs:
-            state_file = session_dir / "session.json"
+            # Support both new (chat.json) and old (session.json) names
+            state_file = session_dir / "chat.json"
+            if not state_file.exists():
+                state_file = session_dir / "session.json"
             try:
                 with open(state_file, "r") as f:
                     state = json.load(f)
@@ -129,7 +132,10 @@ class SessionService:
             Session details dict or None if not found
         """
         session_dir = Path(workspace_base_path) / session_id
-        state_file = session_dir / "session.json"
+        # Support both new (chat.json) and old (session.json) names
+        state_file = session_dir / "chat.json"
+        if not state_file.exists():
+            state_file = session_dir / "session.json"
 
         if not state_file.exists():
             return None

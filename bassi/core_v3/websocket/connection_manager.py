@@ -106,6 +106,14 @@ class ConnectionManager:
             self.permission_manager.websocket = websocket
             logger.info("🔷 [WS] Permission manager websocket set")
 
+        # Determine whether we're resuming an existing session
+        is_resuming = bool(
+            requested_session_id
+            and SessionWorkspace.exists(
+                requested_session_id, base_path=self.workspace_base_path
+            )
+        )
+
         # Send initial status
         await websocket.send_json(
             {
@@ -131,6 +139,11 @@ class ConnectionManager:
         if not session:
             raise RuntimeError("Single agent not initialized!")
 
+        # Always reset and reconnect SDK client with the correct resume flag
+        await session.prepare_for_session(
+            session_id=connection_id, resume=is_resuming
+        )
+
         # Update permission mode if changed
         from bassi.shared.permission_config import get_permission_mode
         current_permission_mode = get_permission_mode()
@@ -155,9 +168,7 @@ class ConnectionManager:
         logger.info(f"🔷 [WS] Agent session ready: {type(session)}")
 
         # 6. Restore conversation history if resuming
-        if requested_session_id and SessionWorkspace.exists(
-            requested_session_id, base_path=self.workspace_base_path
-        ):
+        if is_resuming:
             await self._restore_conversation(session, workspace)
 
         logger.info(

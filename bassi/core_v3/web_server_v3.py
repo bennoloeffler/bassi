@@ -1,19 +1,17 @@
 """
-Web Server V3 - FastAPI app wiring and coordination ONLY.
+Web Server V3 - FastAPI app with Agent Pool architecture.
 
-This module is responsible for:
-1. FastAPI app creation and configuration
-2. Route registration (delegates to route modules)
-3. WebSocket endpoint (delegates to ConnectionManager)
-4. Dependency injection and wiring
+Architecture:
+- Agent Pool: 5 pre-connected agents (first ready immediately, rest warm async)
+- Browser Sessions: WebSocket connections, each acquires an agent from pool
+- Chat Contexts: Persistent conversation history + workspace
 
-All business logic has been extracted to:
-- routes/: HTTP endpoint handlers
-- services/: Business logic (sessions, capabilities, etc.)
-- websocket/: WebSocket connection and message handling
+Terminology:
+- browser_id: Ephemeral WebSocket connection ID
+- chat_id: Persistent conversation context ID
+- agent: Claude SDK client from the pool
 
-BLACK BOX PRINCIPLE:
-This file should be <200 lines - just wiring and coordination.
+See docs/features_concepts/chat_context_architecture.md for details.
 """
 
 import logging
@@ -26,177 +24,137 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig
+from bassi.core_v3.chat_index import ChatIndex
+from bassi.core_v3.chat_workspace import ChatWorkspace
 from bassi.core_v3.routes import (
     capability_routes,
     create_session_router,
     file_routes,
     settings,
 )
-from bassi.core_v3.services.agent_pool_service import (
-    AgentPoolService,
-    PoolConfig,
-)
+from bassi.core_v3.services.agent_pool import AgentPool, get_agent_pool
 from bassi.core_v3.services.capability_service import CapabilityService
 from bassi.core_v3.services.config_service import ConfigService
 from bassi.core_v3.services.permission_manager import PermissionManager
-from bassi.core_v3.session_index import SessionIndex
 from bassi.core_v3.upload_service import UploadService
-from bassi.core_v3.websocket.connection_manager import ConnectionManager
+from bassi.core_v3.websocket.browser_session_manager import BrowserSessionManager
+
+# Backward compatibility imports
+from bassi.core_v3.session_index import SessionIndex  # noqa: F401
+from bassi.core_v3.session_workspace import SessionWorkspace  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
+# Constants
+AGENT_POOL_SIZE = 5
+
 
 class WebUIServerV3:
-    """FastAPI server for bassi web UI (V3 architecture)."""
+    """
+    FastAPI server for bassi web UI with Agent Pool architecture.
+
+    Features:
+    - Pool of 5 pre-connected agents
+    - Fast browser connection (agent already ready)
+    - Support for multiple concurrent browsers
+    - Clean chat context switching
+    """
 
     def __init__(
         self,
-        workspace_base_path: str = "_DATA_FROM_USER",
+        workspace_base_path: str = "chats",
         session_factory: Optional[Callable] = None,
-        enable_agent_pool: bool = False,  # DISABLED - use single agent
-        pool_config: Optional[PoolConfig] = None,
+        pool_size: int = AGENT_POOL_SIZE,
     ):
         """
         Initialize web server.
 
         Args:
-            workspace_base_path: Base directory for session workspaces
+            workspace_base_path: Base directory for chat workspaces
             session_factory: Factory function to create agent sessions
                            (injected for testing)
-            enable_agent_pool: DEPRECATED - always False (single agent mode)
-            pool_config: DEPRECATED - not used
+            pool_size: Number of agents in pool (default 5)
         """
-        from pathlib import Path
-
-        # Convert to Path for internal use
         self.workspace_base_path = Path(workspace_base_path)
-        if session_factory is None:
-            session_factory = create_default_session_factory()
-        self.session_factory = session_factory
+        self._is_custom_session_factory = session_factory is not None
+        self.pool_size = pool_size
 
-        # Single agent instance (replaces pool)
-        self.single_agent: Optional[BassiAgentSession] = None
-        self.agent_pool: Optional[AgentPoolService] = None  # Keep for compatibility, always None
+        # Use custom factory or create default pool factory
+        if session_factory:
+            self.agent_factory = self._wrap_legacy_factory(session_factory)
+        else:
+            self.agent_factory = create_pool_agent_factory()
 
         # Initialize services
-        self.session_index = SessionIndex(self.workspace_base_path)
+        self.chat_index = ChatIndex(self.workspace_base_path)
         self.upload_service = UploadService()
-        self.capability_service = CapabilityService(self.session_factory)
         self.config_service = ConfigService()
         self.permission_manager = PermissionManager(self.config_service)
-
-        # Initialize connection manager (will use single_agent)
-        self.connection_manager = ConnectionManager(
-            session_factory=self.session_factory,
-            session_index=self.session_index,
-            workspace_base_path=self.workspace_base_path,
-            agent_pool=None,  # No pool, using single agent
-            single_agent_provider=lambda: self.single_agent,  # Provide single agent
-            permission_manager=self.permission_manager,  # Permission management
+        self.capability_service = CapabilityService(
+            self._create_capability_factory()
         )
 
-        # TEMPORARY: Bridge for old _process_message compatibility
-        # TODO: Remove when message processors are fully extracted
-        self.active_sessions = self.connection_manager.active_sessions
-        self.question_services = self.connection_manager.question_services
-        self.workspaces = (
-            self.connection_manager.workspaces
-        )  # For auto-naming
+        # Get or create agent pool singleton (survives hot reloads)
+        self.agent_pool = get_agent_pool(
+            size=pool_size,
+            agent_factory=self.agent_factory,
+            acquire_timeout=30.0,
+        )
 
-        # Import and initialize naming service (needed by old _process_message)
+        # Create browser session manager
+        self.browser_session_manager = BrowserSessionManager(
+            agent_pool=self.agent_pool,
+            chat_index=self.chat_index,
+            workspace_base_path=str(self.workspace_base_path),
+            permission_manager=self.permission_manager,
+        )
+
+        # Backward compatibility aliases
+        self.session_index = self.chat_index  # Legacy name
+        self.connection_manager = self.browser_session_manager  # Legacy name
+        self.active_sessions = self.browser_session_manager.active_sessions
+        self.question_services = self.browser_session_manager.question_services
+        self.workspaces = self.browser_session_manager.workspaces
+
+        # Naming service for auto-naming chats
         from bassi.core_v3.session_naming import SessionNamingService
-
         self.naming_service = SessionNamingService()
 
         # Create FastAPI app
         self.app = self._create_app()
-
-        # Register routes
         self._register_routes()
 
-    async def _process_images(self, content_blocks: list[dict[str, Any]]):
-        """
-        Process and save images from content blocks to _DATA_FROM_USER/ folder.
+    def _wrap_legacy_factory(
+        self,
+        legacy_factory: Callable,
+    ) -> Callable[[], BassiAgentSession]:
+        """Wrap legacy factory (with workspace/question args) for pool use."""
 
-        TEMPORARY BRIDGE METHOD - copied from web_server_v3_old.py
-        TODO: Extract to proper message processor when refactoring is complete
+        def pool_factory() -> BassiAgentSession:
+            # Create minimal deps for legacy factory
+            from bassi.core_v3.interactive_questions import InteractiveQuestionService
+            import uuid
 
-        Args:
-            content_blocks: List of content blocks (may contain image blocks)
-        """
-        import base64
-        import time
+            question_service = InteractiveQuestionService()
+            chat_id = str(uuid.uuid4())
+            workspace = ChatWorkspace(chat_id, self.workspace_base_path)
+            return legacy_factory(question_service, workspace)
 
-        for block in content_blocks:
-            if block.get("type") != "image":
-                continue
+        return pool_factory
 
-            source = block.get("source", {})
-            if source.get("type") != "base64":
-                logger.warning(
-                    f"Unsupported image source type: {source.get('type')}"
-                )
-                continue
+    def _create_capability_factory(self) -> Callable:
+        """Create factory for capability discovery."""
+        from bassi.core_v3.interactive_questions import InteractiveQuestionService
+        import uuid
 
-            base64_data = source.get("data", "")
-            media_type = source.get("media_type", "image/png")
-            filename = block.get("filename", f"image_{int(time.time())}.png")
+        def factory(
+            question_service: InteractiveQuestionService,
+            workspace: ChatWorkspace,
+        ) -> BassiAgentSession:
+            # Same as pool agent but with workspace
+            return self.agent_factory()
 
-            if not base64_data:
-                logger.warning("Empty image data, skipping")
-                continue
-
-            try:
-                # Decode base64
-                image_bytes = base64.b64decode(base64_data)
-
-                # Save to _DATA_FROM_USER/
-                data_dir = Path.cwd() / "_DATA_FROM_USER"
-                data_dir.mkdir(exist_ok=True)
-
-                save_path = data_dir / filename
-                save_path.write_bytes(image_bytes)
-
-                logger.info(
-                    f"📷 Saved image: {save_path} ({len(image_bytes)} bytes, {media_type})"
-                )
-
-                # Update block with saved path (for reference)
-                block["saved_path"] = str(save_path)
-
-            except Exception as e:
-                logger.error(f"Failed to save image {filename}: {e}")
-
-    async def _create_single_agent(self) -> BassiAgentSession:
-        """Create the single shared agent instance."""
-        from pathlib import Path
-
-        from bassi.shared.mcp_registry import create_mcp_registry
-        from bassi.shared.permission_config import get_permission_mode
-
-        # Create complete MCP registry
-        mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
-        mcp_servers = create_mcp_registry(
-            include_sdk=True,  # Include bash, web, task_automation
-            config_path=mcp_config_path,
-        )
-
-        permission_mode = get_permission_mode()
-        logger.info(f"🔐 Creating single agent with permission_mode: {permission_mode}")
-
-        config = SessionConfig(
-            allowed_tools=["*"],  # Allow ALL tools
-            permission_mode=permission_mode,
-            mcp_servers=mcp_servers,
-            setting_sources=["project", "local"],
-            can_use_tool=self.permission_manager.can_use_tool_callback,  # Permission callback
-        )
-
-        session = BassiAgentSession(config)
-        await session.connect()
-        logger.info("✅ Single agent connected to SDK")
-
-        return session
+        return factory
 
     def _create_app(self) -> FastAPI:
         """Create and configure FastAPI application."""
@@ -211,7 +169,7 @@ class WebUIServerV3:
             allow_headers=["*"],
         )
 
-        # Static files (with cache busting for development)
+        # Static files
         static_dir = Path(__file__).parent.parent / "static"
         app.mount(
             "/static",
@@ -219,39 +177,45 @@ class WebUIServerV3:
             name="static",
         )
 
-        # Startup event: Create single agent
+        # Startup: Initialize agent pool (idempotent - safe to call multiple times)
         @app.on_event("startup")
         async def startup():
-            logger.info("🤖 [SERVER] Creating single agent instance...")
-            self.single_agent = await self._create_single_agent()
-            logger.info("✅ [SERVER] Single agent ready")
+            logger.info(f"🚀 [SERVER] STARTUP EVENT - pool_id={id(self.agent_pool)}, started={self.agent_pool._started}, shutdown={self.agent_pool._shutdown}")
+            if self.agent_pool._started:
+                logger.info("♻️ [SERVER] Agent pool already started (hot reload)")
+                stats = self.agent_pool.get_stats()
+                logger.info(f"♻️ [SERVER] Pool status: {stats['total_agents']} agents, {stats['available']} available")
+            else:
+                logger.info(f"🏊 [SERVER] Starting agent pool with {self.pool_size} agents...")
+                await self.agent_pool.start()
+                stats = self.agent_pool.get_stats()
+                logger.info(
+                    f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, pool_id={id(self.agent_pool)}"
+                )
 
-        # Shutdown event: Cleanup single agent
+        # Shutdown: Only shutdown on real server stop, not hot reload
         @app.on_event("shutdown")
         async def shutdown():
-            if self.single_agent:
-                logger.info("🤖 [SERVER] Disconnecting agent...")
-                await self.single_agent.disconnect()
-                logger.info("✅ [SERVER] Agent disconnected")
+            logger.info(f"🛑 [SERVER] SHUTDOWN EVENT - pool_id={id(self.agent_pool)}")
+            await self.agent_pool.shutdown()
+            logger.info("✅ [SERVER] Agent pool shutdown complete")
 
-        # Health check endpoint
+        # Health check
         @app.get("/health")
         async def health():
-            health_data = {
+            pool_stats = self.agent_pool.get_stats()
+            manager_stats = self.browser_session_manager.get_stats()
+            return JSONResponse({
                 "status": "healthy",
-                "active_connections": len(
-                    self.connection_manager.active_connections
-                ),
-                "active_sessions": len(
-                    self.connection_manager.active_sessions
-                ),
-                "single_agent_connected": (
-                    self.single_agent._connected if self.single_agent else False
-                ),
-            }
-            return JSONResponse(health_data)
+                # Backward compatibility: flatten key stats to root level
+                "active_connections": manager_stats.get("active_connections", 0),
+                "active_sessions": manager_stats.get("active_chats", 0),
+                # Detailed stats under nested keys
+                "pool": pool_stats,
+                "sessions": manager_stats,
+            })
 
-        # Serve index.html for root
+        # Root: Serve index.html
         @app.get("/")
         async def serve_index():
             index_file = static_dir / "index.html"
@@ -261,20 +225,20 @@ class WebUIServerV3:
 
     def _register_routes(self):
         """Register all route modules."""
-        # Session routes (with workspace_base_path injected)
+        # Session/Chat routes (backward compatible)
         session_router = create_session_router(
             workspace_base_path=self.workspace_base_path
         )
         self.app.include_router(session_router)
 
-        # File routes (requires dependency injection)
+        # File routes
         file_router = file_routes.create_file_router(
-            workspaces=self.connection_manager.workspaces,
+            workspaces=self.workspaces,
             upload_service=self.upload_service,
         )
         self.app.include_router(file_router)
 
-        # Capability routes (requires dependency injection)
+        # Capability routes
         capability_router = capability_routes.create_capability_router(
             capability_service=self.capability_service
         )
@@ -283,117 +247,96 @@ class WebUIServerV3:
         # Settings routes
         self.app.include_router(settings.router)
 
-        # WebSocket endpoint
+        # WebSocket endpoint (supports both old and new param names)
         @self.app.websocket("/ws")
         async def websocket_endpoint(
-            websocket: WebSocket, session_id: Optional[str] = None
+            websocket: WebSocket,
+            session_id: Optional[str] = None,
+            chat_id: Optional[str] = None,
         ):
-            await self._handle_websocket(websocket, session_id)
+            # Use chat_id if provided, fall back to session_id for compatibility
+            requested_chat_id = chat_id or session_id
+            await self._handle_websocket(websocket, requested_chat_id)
 
     async def _handle_websocket(
-        self, websocket: WebSocket, requested_session_id: Optional[str] = None
+        self,
+        websocket: WebSocket,
+        requested_chat_id: Optional[str] = None,
     ):
-        """
-        Handle WebSocket connection.
+        """Handle WebSocket connection via BrowserSessionManager."""
 
-        Delegates to ConnectionManager for lifecycle management.
-        Creates a MessageHandler with a temporary processor for now
-        (TODO: extract all message processors into separate files).
-        """
-
-        # For now, we keep the message processor inline
-        # (TODO: Extract to websocket/message_processors/)
         async def process_message(
-            websocket: WebSocket, data: dict, connection_id: str
+            websocket: WebSocket,
+            data: dict,
+            chat_id: str,
         ):
-            """
-            Temporary inline message processor.
-
-            TODO: This should be split into:
-            - websocket/message_processors/user_message_processor.py
-            - websocket/message_processors/hint_processor.py
-            - websocket/message_processors/config_processor.py
-            - websocket/message_processors/answer_processor.py
-            - websocket/message_processors/interrupt_processor.py
-            - websocket/message_processors/server_info_processor.py
-            """
-            # Import the original _process_message from OLD file temporarily
-            # This allows us to keep functionality while refactoring incrementally
+            """Message processor - delegates to old implementation for now."""
             from bassi.core_v3 import web_server_v3_old
-
-            # Get original server instance method from OLD implementation
-            # NOTE: This is a temporary bridge - we'll replace this with
-            # proper message processors in the next refactoring phase
             await web_server_v3_old.WebUIServerV3._process_message(
-                self, websocket, data, connection_id
+                self, websocket, data, chat_id
             )
 
-        # Delegate connection handling to ConnectionManager
-        await self.connection_manager.handle_connection(
+        await self.browser_session_manager.handle_connection(
             websocket=websocket,
-            requested_session_id=requested_session_id,
+            requested_chat_id=requested_chat_id,
             message_processor=process_message,
         )
 
-    async def run(self, reload: bool = False):
-        """
-        Run the web server.
+    async def _process_images(self, content_blocks: list[dict[str, Any]]):
+        """Process and save images from content blocks."""
+        import base64
+        import time
 
-        Args:
-            reload: Enable hot reload for development
-        """
+        for block in content_blocks:
+            if block.get("type") != "image":
+                continue
+
+            source = block.get("source", {})
+            if source.get("type") != "base64":
+                continue
+
+            base64_data = source.get("data", "")
+            media_type = source.get("media_type", "image/png")
+            filename = block.get("filename", f"image_{int(time.time())}.png")
+
+            if not base64_data:
+                continue
+
+            try:
+                image_bytes = base64.b64decode(base64_data)
+                data_dir = Path.cwd() / "_DATA_FROM_USER"
+                data_dir.mkdir(exist_ok=True)
+                save_path = data_dir / filename
+                save_path.write_bytes(image_bytes)
+                block["saved_path"] = str(save_path)
+                logger.info(f"📷 Saved image: {save_path}")
+            except Exception as e:
+                logger.error(f"Failed to save image: {e}")
+
+    async def run(self, reload: bool = False):
+        """Run the web server."""
         import subprocess
         import sys
         import uvicorn
-        from pathlib import Path
 
         logger.info("Starting Bassi Web UI V3 on http://localhost:8765")
 
         if reload:
-            logger.info(
-                "🔥 Hot reload enabled - server will restart on file changes"
-            )
-            logger.info("   Watching: bassi/core_v3/**/*.py")
-            logger.info("   Watching: bassi/static/*.{html,css,js}")
-            logger.info("")
-            logger.info(
-                "💡 Tip: Edit files and they'll auto-reload in ~2-3 seconds"
-            )
-            logger.info("")
-
-            # Use uvicorn CLI for proper reload support with watchfiles
-            # Can't use uvicorn.Config programmatically because it requires
-            # module path string for reload to work properly
+            logger.info("🔥 Hot reload enabled")
             reload_dir = str(Path(__file__).parent.parent)
             try:
                 subprocess.run(
                     [
-                        sys.executable,
-                        "-m",
-                        "uvicorn",
+                        sys.executable, "-m", "uvicorn",
                         "bassi.core_v3.web_server_v3:get_app",
-                        "--factory",
-                        "--host",
-                        "localhost",
-                        "--port",
-                        "8765",
-                        "--reload",
-                        "--reload-dir",
-                        reload_dir,
+                        "--factory", "--host", "localhost",
+                        "--port", "8765", "--reload",
+                        "--reload-dir", reload_dir,
                     ],
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                logger.error(f"❌ Failed to start web server: {e}")
-                logger.error("")
-                logger.error(
-                    f"💡 Port 8765 may already be in use. Try:"
-                )
-                logger.error("   • pkill -9 -f bassi-web")
-                logger.error(
-                    f"   • lsof -i :8765  (to see what's using the port)"
-                )
-                logger.error("")
+                logger.error(f"❌ Failed to start: {e}")
                 raise
         else:
             config = uvicorn.Config(
@@ -407,128 +350,70 @@ class WebUIServerV3:
             await server.serve()
 
 
-# Entry point
-def create_server(
-    workspace_base_path: str = "_DATA_FROM_USER",
-    session_factory: Optional[Callable] = None,
-) -> WebUIServerV3:
+def create_pool_agent_factory() -> Callable[[], BassiAgentSession]:
     """
-    Create web server instance.
+    Create agent factory for the pool.
 
-    Args:
-        workspace_base_path: Base directory for session workspaces
-        session_factory: Optional custom session factory (for testing)
-
-    Returns:
-        Configured WebUIServerV3 instance
+    Pool agents are created WITHOUT workspace/question_service.
+    These are attached when the agent is acquired by a browser session.
     """
-    return WebUIServerV3(
-        workspace_base_path=workspace_base_path,
-        session_factory=session_factory,
-    )
-
-
-def create_default_pool_session_factory() -> Callable:
-    """
-    Create session factory for agent pool (NO workspace/question_service deps).
-
-    Returns:
-        Factory function that creates BassiAgentSession instances for the pool
-    """
-    from pathlib import Path
-
     from bassi.shared.mcp_registry import create_mcp_registry
     from bassi.shared.permission_config import get_permission_mode
 
     def factory() -> BassiAgentSession:
-        """
-        Factory to create BassiAgentSession for agent pool.
-
-        Pool agents are created WITHOUT workspace or question_service.
-        These will be set later when the agent is acquired from the pool.
-
-        Returns:
-            Configured agent session (no workspace/question service)
-        """
-        # Create complete MCP registry (without bassi-interactive)
-        # bassi-interactive will be added when agent is acquired
         mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
         mcp_servers = create_mcp_registry(
-            include_sdk=True,  # Include bash, web, task_automation
+            include_sdk=True,
             config_path=mcp_config_path,
         )
 
         permission_mode = get_permission_mode()
-        logger.info(f"🔐 Creating pool agent with permission_mode: {permission_mode}")
+        logger.debug(f"🔐 Creating pool agent with permission_mode: {permission_mode}")
 
         config = SessionConfig(
-            allowed_tools=["*"],  # Allow ALL tools
-            system_prompt=None,  # Will be set when acquired (workspace context)
+            allowed_tools=["*"],
             permission_mode=permission_mode,
             mcp_servers=mcp_servers,
             setting_sources=["project", "local"],
         )
-        session = BassiAgentSession(config)
-        return session
+        return BassiAgentSession(config)
 
     return factory
 
 
 def create_default_session_factory() -> Callable:
     """
-    Create default session factory with standard configuration.
+    Create default session factory (backward compatibility).
 
-    Returns:
-        Factory function that creates BassiAgentSession instances
+    This creates agents with workspace context, used by tests and
+    legacy code paths.
     """
-    from pathlib import Path
-
-    from bassi.core_v3.agent_session import SessionConfig
-    from bassi.core_v3.session_workspace import SessionWorkspace
-    from bassi.core_v3.tools import (
-        InteractiveQuestionService,
-        create_bassi_tools,
-    )
+    from bassi.core_v3.tools import InteractiveQuestionService, create_bassi_tools
     from bassi.shared.mcp_registry import create_mcp_registry
     from bassi.shared.permission_config import get_permission_mode
     from bassi.shared.sdk_loader import create_sdk_mcp_server
 
     def factory(
         question_service: InteractiveQuestionService,
-        workspace: SessionWorkspace,
+        workspace: ChatWorkspace,
     ) -> BassiAgentSession:
-        """
-        Factory to create BassiAgentSession with interactive question handling.
-
-        Args:
-            question_service: Service for asking user questions
-            workspace: Session workspace for file access
-
-        Returns:
-            Configured agent session
-        """
-        # Create bassi-interactive MCP server for questions
         bassi_tools = create_bassi_tools(question_service)
         bassi_mcp_server = create_sdk_mcp_server(
             name="bassi-interactive", version="1.0.0", tools=bassi_tools
         )
 
-        # Create complete MCP registry
         mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
         mcp_servers = create_mcp_registry(
-            include_sdk=True,  # Include bash, web, task_automation
+            include_sdk=True,
             config_path=mcp_config_path,
             custom_servers={"bassi-interactive": bassi_mcp_server},
         )
 
-        # Generate workspace context for agent awareness
         workspace_context = workspace.get_workspace_context()
-
         permission_mode = get_permission_mode()
-        logger.info(f"🔐 Creating session with permission_mode: {permission_mode}")
 
         config = SessionConfig(
-            allowed_tools=["*"],  # Allow ALL tools
+            allowed_tools=["*"],
             system_prompt=workspace_context,
             permission_mode=permission_mode,
             mcp_servers=mcp_servers,
@@ -541,6 +426,10 @@ def create_default_session_factory() -> Callable:
     return factory
 
 
+# Backward compatibility aliases
+create_default_pool_session_factory = create_pool_agent_factory
+
+
 async def start_web_server_v3(
     session_factory: Optional[Callable] = None,
     host: str = "localhost",
@@ -548,19 +437,7 @@ async def start_web_server_v3(
     reload: bool = False,
     workspace_base_path: str = "chats",
 ):
-    """
-    Start the web UI server V3.
-
-    Args:
-        session_factory: Factory to create BassiAgentSession instances
-        host: Server hostname
-        port: Server port
-        reload: Enable hot reload for development
-        workspace_base_path: Base directory for session workspaces
-    """
-    if session_factory is None:
-        session_factory = create_default_session_factory()
-
+    """Start the web UI server V3."""
     server = WebUIServerV3(
         workspace_base_path=workspace_base_path,
         session_factory=session_factory,
@@ -568,12 +445,18 @@ async def start_web_server_v3(
     await server.run(reload=reload)
 
 
+def create_server(
+    workspace_base_path: str = "chats",
+    session_factory: Optional[Callable] = None,
+) -> WebUIServerV3:
+    """Create web server instance."""
+    return WebUIServerV3(
+        workspace_base_path=workspace_base_path,
+        session_factory=session_factory,
+    )
+
+
 def get_app() -> FastAPI:
-    """
-    Factory function for uvicorn CLI reload mode.
-    
-    This is called by uvicorn when using --factory flag.
-    Creates a new server instance and returns its FastAPI app.
-    """
+    """Factory function for uvicorn CLI reload mode."""
     server = WebUIServerV3(workspace_base_path="chats")
     return server.app

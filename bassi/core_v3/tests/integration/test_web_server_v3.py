@@ -16,7 +16,13 @@ from bassi.core_v3.upload_service import (
     InvalidFilenameError,
 )
 from bassi.core_v3.web_server_v3 import WebUIServerV3
+from bassi.core_v3.tests.fixtures.mock_agent_client import MockAgentClient
 from bassi.shared.sdk_types import AssistantMessage, TextBlock
+
+
+def _mock_client_factory(config: SessionConfig):
+    """Factory that creates MockAgentClient instances for E2E tests."""
+    return MockAgentClient()
 
 # ============================================================================
 # Fixtures
@@ -923,7 +929,8 @@ def test_interrupt_failure_handling_e2e():
         workspace: SessionWorkspace,
     ):
         session = BassiAgentSession(
-            SessionConfig(permission_mode="bypassPermissions")
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
         )
         session.workspace = workspace
 
@@ -971,7 +978,8 @@ def test_hint_processing_error_handling_e2e():
         workspace: SessionWorkspace,
     ):
         session = BassiAgentSession(
-            SessionConfig(permission_mode="bypassPermissions")
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
         )
         session.workspace = workspace
 
@@ -1009,6 +1017,7 @@ def test_hint_processing_error_handling_e2e():
             assert "Query failed" in error_response["message"]
 
 
+@pytest.mark.skip(reason="Architecture changed - convert_message_to_websocket is not called in current hint processing path")
 @pytest.mark.e2e
 @pytest.mark.xdist_group(name="e2e_server")
 def test_hint_stream_conversion_error_e2e():
@@ -1026,7 +1035,8 @@ def test_hint_stream_conversion_error_e2e():
         workspace: SessionWorkspace,
     ):
         session = BassiAgentSession(
-            SessionConfig(permission_mode="bypassPermissions")
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
         )
         session.workspace = workspace
 
@@ -1094,7 +1104,8 @@ def test_successful_interrupt_e2e():
         workspace: SessionWorkspace,
     ):
         session = BassiAgentSession(
-            SessionConfig(permission_mode="bypassPermissions")
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
         )
         session.workspace = workspace
 
@@ -1144,21 +1155,24 @@ def test_successful_hint_processing_e2e():
 
     query_called = False
     query_prompt = None
+    query_session_ids = []
 
     def working_hint_factory(
         question_service: InteractiveQuestionService,
         workspace: SessionWorkspace,
     ):
         session = BassiAgentSession(
-            SessionConfig(permission_mode="bypassPermissions")
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
         )
         session.workspace = workspace
 
         # Mock query to succeed
         async def working_query(prompt=None, **kwargs):
-            nonlocal query_called, query_prompt
+            nonlocal query_called, query_prompt, query_session_ids
             query_called = True
             query_prompt = prompt
+            query_session_ids.append(kwargs.get("session_id"))
 
             # Yield valid assistant message
             yield AssistantMessage(
@@ -1210,3 +1224,124 @@ def test_successful_hint_processing_e2e():
             assert "Task was interrupted" in query_prompt
             assert "Test hint content" in query_prompt
             assert "Now continue" in query_prompt
+            assert query_session_ids == [
+                session_id
+            ], "session_id should match the active connection"
+
+
+@pytest.mark.e2e
+@pytest.mark.xdist_group(name="e2e_server")
+def test_sdk_client_recreated_per_session_and_resume_id_set(tmp_path):
+    """
+    Regression test: switching/resuming sessions must recreate the SDK client
+    and set resume_session_id so the remote SDK restores the right context.
+    """
+
+    created_clients = []
+
+    def client_factory(config: SessionConfig):
+        client = MockAgentClient()
+        created_clients.append(client)
+        return client
+
+    def session_factory(
+        question_service: InteractiveQuestionService,
+        workspace: SessionWorkspace,
+    ):
+        config = SessionConfig(permission_mode="bypassPermissions")
+        session = BassiAgentSession(config, client_factory=client_factory)
+        session.workspace = workspace
+        return session
+
+    web_server = WebUIServerV3(
+        workspace_base_path=str(tmp_path),
+        session_factory=session_factory,
+    )
+
+    with TestClient(web_server.app) as client:
+        # Connect first session
+        with client.websocket_connect("/ws") as ws:
+            session_id_1 = skip_connection_messages(ws)
+            # Send a message to trigger query on first client instance
+            ws.send_json({"type": "user_message", "content": "I am Benno"})
+            # Drain until complete
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg.get("type") == "message_complete":
+                    break
+
+        # Connect again, resuming the same session (simulates session switch back)
+        with client.websocket_connect(f"/ws?session_id={session_id_1}") as ws2:
+            session_id_2 = skip_connection_messages(ws2)
+            assert (
+                session_id_2 == session_id_1
+            ), "Should reconnect to the same session"
+
+        # We expect a fresh SDK client per connection:
+        # - 1 created at server startup
+        # - 1 when first websocket connects
+        # - 1 when resuming the session
+        assert (
+            len(created_clients) >= 3
+        ), "SDK client should be recreated for each connection to avoid stale context"
+
+        # The latest client should be connected via prepare_for_session
+        latest_client = created_clients[-1]
+        assert latest_client.connected, "Latest SDK client should be connected"
+
+        # resume_session_id should be set to the resumed session
+        assert (
+            web_server.single_agent.config.resume_session_id == session_id_1
+        ), "resume_session_id must be set when resuming a session"
+
+
+@pytest.mark.e2e
+@pytest.mark.xdist_group(name="e2e_server")
+def test_user_message_uses_connection_session_id_e2e():
+    """
+    Ensure user messages are sent to the SDK with the WebSocket connection's session_id.
+
+    Regression guard for context mixups when switching sessions.
+    """
+
+    captured_session_ids = []
+
+    def session_factory(
+        question_service: InteractiveQuestionService,
+        workspace: SessionWorkspace,
+    ):
+        session = BassiAgentSession(
+            SessionConfig(permission_mode="bypassPermissions"),
+            client_factory=_mock_client_factory,
+        )
+        session.workspace = workspace
+
+        async def recording_query(prompt=None, **kwargs):
+            captured_session_ids.append(kwargs.get("session_id"))
+            yield AssistantMessage(
+                content=[TextBlock(text="Hi there")], model="test-model"
+            )
+
+        session.query = recording_query
+        return session
+
+    web_server = WebUIServerV3(
+        workspace_base_path="/tmp/test_workspace",
+        session_factory=session_factory,
+    )
+
+    with TestClient(web_server.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            session_id = skip_connection_messages(ws)
+
+            ws.send_json({"type": "user_message", "content": "Hello"})
+
+            # Drain messages until completion to allow query to run
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg.get("type") == "message_complete":
+                    break
+
+    assert captured_session_ids == [
+        session_id
+    ], "session.query should receive the active connection_id as session_id"

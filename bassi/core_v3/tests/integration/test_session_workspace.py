@@ -48,17 +48,19 @@ class TestSessionWorkspaceInitialization:
         assert (workspace.physical_path / "DATA_FROM_AGENT").exists()
 
     def test_creates_metadata_file(self, tmp_path):
-        """Should create session.json with metadata."""
+        """Should create chat.json with metadata."""
         session_id = "test-123"
         workspace = SessionWorkspace(session_id, base_path=tmp_path)
 
-        metadata_path = workspace.physical_path / "session.json"
+        # Now uses chat.json (renamed from session.json)
+        metadata_path = workspace.physical_path / "chat.json"
         assert metadata_path.exists()
 
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
 
-        assert metadata["session_id"] == session_id
+        # Check for chat_id (new) or session_id (backward compat)
+        assert metadata.get("chat_id") == session_id or metadata.get("session_id") == session_id
         assert "display_name" in metadata
         assert "created_at" in metadata
         assert metadata["state"] == "CREATED"
@@ -307,8 +309,8 @@ class TestDisplayName:
 
         assert temp_workspace.display_name == new_name
 
-        # Verify persisted to file
-        metadata_path = temp_workspace.physical_path / "session.json"
+        # Verify persisted to file (now uses chat.json)
+        metadata_path = temp_workspace.physical_path / "chat.json"
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
 
@@ -407,7 +409,8 @@ class TestSessionLoading:
 
     def test_raises_error_if_session_not_found(self, tmp_path):
         """Should raise FileNotFoundError for non-existent session."""
-        with pytest.raises(FileNotFoundError, match="Session not found"):
+        # Error message now says "Chat not found" (renamed from Session)
+        with pytest.raises(FileNotFoundError, match="(Session|Chat) not found"):
             SessionWorkspace.load("nonexistent-session", base_path=tmp_path)
 
     def test_checks_session_existence(self, tmp_path):
@@ -510,16 +513,16 @@ class TestSymlinkEdgeCases:
     """Test edge cases in symlink management."""
 
     def test_empty_sanitized_name_fallback(self, tmp_path):
-        """Should use 'unnamed-session' when sanitized name is empty."""
+        """Should use 'unnamed-chat' when sanitized name is empty."""
         session_id = "test-session-456"
         workspace = SessionWorkspace(session_id, base_path=tmp_path)
 
         # Update symlink with name that sanitizes to empty (special chars only)
         workspace.update_symlink("!!!")
 
-        # Check that "unnamed-session" was used
+        # Check that "unnamed-chat" was used (renamed from unnamed-session)
         symlink_name = workspace.metadata["symlink_name"]
-        assert "unnamed-session" in symlink_name
+        assert "unnamed-chat" in symlink_name
 
     def test_symlink_safety_limit_exceeded(self, tmp_path, monkeypatch):
         """Should raise error when symlink collision exceeds 100 attempts."""

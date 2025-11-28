@@ -101,6 +101,8 @@ This means:
 - ✅ Conversation continuity is maintained
 - ❌ UI cannot display previous conversation on startup
 
+**Web UI Limitation**: In the web interface with agent pooling, the SDK's `options.resume` cannot be changed after connection due to async context restrictions. Chat switching uses context injection instead. See [SDK Session Limitation](./sdk_session_limitation.md) for details.
+
 ## Testing
 
 Run the test script to verify context persistence:

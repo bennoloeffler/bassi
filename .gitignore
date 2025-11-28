@@ -70,3 +70,5 @@ _DOWNLOADS_FROM_AGENT/
 _RESULTS_FROM_AGENT/
 _SCRIPTS_FROM_AGENT/
 bin/
+~/.cursor/
+.cursor/

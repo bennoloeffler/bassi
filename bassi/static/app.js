@@ -155,14 +155,22 @@ class BassiWebClient {
         this.conversationEl.classList.add(`verbose-${this.verboseLevel}`)
 
         // File upload button
+        console.log('🔍 Upload button:', this.uploadButton)
+        console.log('🔍 File input:', this.fileInput)
         if (this.uploadButton && this.fileInput) {
-            this.uploadButton.addEventListener('click', () => {
+            this.uploadButton.addEventListener('click', (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('📎 Upload button clicked!')
                 this.fileInput.click()
             })
 
             this.fileInput.addEventListener('change', async (e) => {
+                console.log('📁 File selected:', e.target.files)
                 await this.handleFileSelect(e)
             })
+        } else {
+            console.error('❌ Upload button or file input not found!')
         }
 
         // Initialize settings
@@ -480,6 +488,15 @@ class BassiWebClient {
             })
 
             if (response.ok) {
+                // Notify WebSocket to update agent permission mode
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'permission_change',
+                        bypass_permissions: enabled
+                    }))
+                    console.log(`🔐 Notified agent of permission change: bypass=${enabled}`)
+                }
+
                 this.showNotification(
                     enabled
                         ? '🔓 All tools allowed - agent runs autonomously'
@@ -1854,11 +1871,15 @@ class BassiWebClient {
 
         switch (msg.type) {
             case 'connected':
-                console.log('🔷 [FRONTEND] Got "connected" event, Session ID:', msg.session_id)
+                // NOTE: Backend sends both chat_id (new) and session_id (backward compat)
+                // We use session_id for now, can migrate to chat_id later
+                const chatId = msg.chat_id || msg.session_id
+                console.log('🔷 [FRONTEND] Got "connected" event, Chat ID:', chatId)
 
                 // Store session ID for file uploads and session management
-                this.sessionId = msg.session_id
-                console.log('✅ [FRONTEND] Session ID stored:', this.sessionId)
+                // (internally this is now the chat_id, but we keep the variable name)
+                this.sessionId = chatId
+                console.log('✅ [FRONTEND] Chat ID stored:', this.sessionId)
 
                 // Load any existing session files (for resumed sessions)
                 this.loadSessionFiles()
