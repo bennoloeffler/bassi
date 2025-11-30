@@ -1,5 +1,5 @@
 ---
-name: contact-creator
+name: bel-contact-creator
 description: This skill should be used when the user asks to create a contact in Outlook from freeform text data (e.g., business cards, email signatures, addresses). It handles parsing contact information and creating properly structured Outlook contacts that sync to mobile devices.
 ---
 

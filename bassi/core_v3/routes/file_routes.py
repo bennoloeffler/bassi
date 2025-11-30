@@ -4,15 +4,18 @@ File Routes - HTTP endpoints for file management.
 BLACK BOX INTERFACE:
 - POST /api/upload - Upload file to session workspace
 - GET /api/sessions/{session_id}/files - List files in session workspace
+- GET /api/sessions/{session_id}/file/{path} - Get file content
 
 DEPENDENCIES: UploadService, workspace manager
 """
 
 import logging
+import mimetypes
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from bassi.core_v3.upload_service import (
     FileTooLargeError,
@@ -153,6 +156,63 @@ def create_file_router(
             )
             raise HTTPException(
                 status_code=500, detail=f"Failed to list files: {str(e)}"
+            )
+
+    @router.get("/api/sessions/{session_id}/file/{file_path:path}")
+    async def get_file_content(
+        session_id: str, file_path: str
+    ) -> FileResponse:
+        """
+        Get file content from session workspace.
+
+        Args:
+            session_id: The session ID
+            file_path: Relative path to file within workspace
+
+        Returns:
+            FileResponse with file content
+
+        Raises:
+            HTTPException(404): If session or file not found
+            HTTPException(403): If path traversal attempt detected
+        """
+        workspace = workspaces.get(session_id)
+        if not workspace:
+            raise HTTPException(
+                status_code=404, detail=f"Session not found: {session_id}"
+            )
+
+        try:
+            # Resolve and validate file path
+            workspace_path = workspace.physical_path
+            full_path = (workspace_path / file_path).resolve()
+
+            # Security: ensure path is within workspace
+            if not str(full_path).startswith(str(workspace_path.resolve())):
+                raise HTTPException(
+                    status_code=403, detail="Path traversal not allowed"
+                )
+
+            if not full_path.exists() or not full_path.is_file():
+                raise HTTPException(
+                    status_code=404, detail=f"File not found: {file_path}"
+                )
+
+            # Determine media type
+            media_type, _ = mimetypes.guess_type(str(full_path))
+            if not media_type:
+                media_type = "application/octet-stream"
+
+            return FileResponse(
+                path=full_path, media_type=media_type, filename=full_path.name
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get file {file_path}: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to get file: {str(e)}"
             )
 
     return router

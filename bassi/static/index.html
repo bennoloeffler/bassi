@@ -22,12 +22,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markdown.min.js"></script>
 </head>
 <body>
-    <!-- Session Sidebar Toggle Button (outside main content) -->
-    <button id="session-sidebar-toggle" class="session-sidebar-toggle" title="Toggle sessions">
-        <svg class="session-sidebar-toggle-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
-    </button>
+    <!-- Session Sidebar Controls (outside main content) -->
+    <div class="session-sidebar-controls">
+        <button id="session-sidebar-toggle" class="session-sidebar-toggle" title="Toggle sessions">
+            <svg class="session-sidebar-toggle-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+        <button id="new-session-button" class="new-session-button" title="New session">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+        </button>
+    </div>
 
     <!-- Session Sidebar (outside main content) -->
     <div id="session-sidebar" class="session-sidebar">
@@ -56,12 +64,6 @@
             </div>
             -->
         </div>
-
-        <div class="session-sidebar-footer">
-            <button id="new-session-button" class="new-session-button">
-                + New Session
-            </button>
-        </div>
     </div>
 
     <!-- Main Content Wrapper (shifts when sidebar opens) -->
@@ -85,6 +87,23 @@
                 </div>
                 <!-- Settings Status Icons -->
                 <div class="settings-icons">
+                    <!-- Model Selection Icon (AI chip) -->
+                    <button id="model-icon" class="settings-icon-button model-haiku" title="Model: Haiku 4.5">
+                        <!-- AI chip/processor icon -->
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="4" y="4" width="16" height="16" rx="2"/>
+                            <rect x="9" y="9" width="6" height="6"/>
+                            <path d="M9 1v3"/>
+                            <path d="M15 1v3"/>
+                            <path d="M9 20v3"/>
+                            <path d="M15 20v3"/>
+                            <path d="M20 9h3"/>
+                            <path d="M20 15h3"/>
+                            <path d="M1 9h3"/>
+                            <path d="M1 15h3"/>
+                        </svg>
+                        <span class="model-level-badge">1</span>
+                    </button>
                     <!-- Thinking Mode Icon (Lightbulb) -->
                     <button id="thinking-icon" class="settings-icon-button active" title="Show Thinking Process: ON">
                         <!-- Lightbulb icon - represents ideas/thinking -->
@@ -157,16 +176,9 @@
                 </div>
             </div>
 
-            <!-- Session Files List Area -->
-            <div id="file-list-area" class="file-list-area" style="display: none;">
-                <div class="file-list-header" onclick="window.bassiClient.toggleFileList()">
-                    <span class="file-list-count">📁 0 files in session</span>
-                    <span class="file-list-toggle-icon">▼</span>
-                </div>
-                <div id="file-list-content" class="file-list-content" style="display: none;">
-                    <div class="file-list-empty">No files uploaded yet</div>
-                    <!-- File list items will be added here -->
-                </div>
+            <!-- Session Files List Area (DEPRECATED: files now shown only in chips) -->
+            <div id="file-list-area" class="file-list-area" style="display: none !important;">
+                <!-- This area is deprecated. Session files are now shown in file chips only. -->
             </div>
 
             <!-- Input Area Components -->
@@ -210,6 +222,55 @@
                 <button class="modal-close" id="settings-close">×</button>
             </div>
             <div class="modal-body">
+                <!-- Model Selection -->
+                <div class="setting-item setting-item-model">
+                    <div class="setting-info">
+                        <label class="setting-label">Model Selection</label>
+                        <p class="setting-description">
+                            Choose the AI model for your conversations
+                        </p>
+                    </div>
+                    <div class="model-selection">
+                        <label class="model-option model-haiku">
+                            <input type="radio" name="model-level" value="1">
+                            <span class="model-option-content">
+                                <span class="model-option-name">Haiku 4.5</span>
+                                <span class="model-option-desc">Fastest for quick answers</span>
+                            </span>
+                        </label>
+                        <label class="model-option model-sonnet">
+                            <input type="radio" name="model-level" value="2">
+                            <span class="model-option-content">
+                                <span class="model-option-name">Sonnet 4.5</span>
+                                <span class="model-option-desc">Best for everyday tasks</span>
+                            </span>
+                        </label>
+                        <label class="model-option model-opus">
+                            <input type="radio" name="model-level" value="3">
+                            <span class="model-option-content">
+                                <span class="model-option-name">Opus 4.5</span>
+                                <span class="model-option-desc">Most capable for complex work</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Auto-Escalate Toggle -->
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <label class="setting-label">Auto-Escalate on Failures</label>
+                        <p class="setting-description">
+                            Automatically upgrade to a more capable model after 3 consecutive errors
+                        </p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="auto-escalate-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-divider"></div>
+
                 <!-- Thinking Process Toggle -->
                 <div class="setting-item">
                     <div class="setting-info">

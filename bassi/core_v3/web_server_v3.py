@@ -37,7 +37,9 @@ from bassi.core_v3.services.capability_service import CapabilityService
 from bassi.core_v3.services.config_service import ConfigService
 from bassi.core_v3.services.permission_manager import PermissionManager
 from bassi.core_v3.upload_service import UploadService
-from bassi.core_v3.websocket.browser_session_manager import BrowserSessionManager
+from bassi.core_v3.websocket.browser_session_manager import (
+    BrowserSessionManager,
+)
 
 # Backward compatibility imports
 from bassi.core_v3.session_index import SessionIndex  # noqa: F401
@@ -90,7 +92,9 @@ class WebUIServerV3:
         if session_factory:
             self.agent_factory = self._wrap_legacy_factory(session_factory)
         else:
-            self.agent_factory = create_pool_agent_factory(self.permission_manager)
+            self.agent_factory = create_pool_agent_factory(
+                self.permission_manager
+            )
         self.capability_service = CapabilityService(
             self._create_capability_factory()
         )
@@ -114,11 +118,14 @@ class WebUIServerV3:
         self.session_index = self.chat_index  # Legacy name
         self.connection_manager = self.browser_session_manager  # Legacy name
         self.active_sessions = self.browser_session_manager.active_sessions
-        self.question_services = self.browser_session_manager.question_services
+        self.question_services = (
+            self.browser_session_manager.question_services
+        )
         self.workspaces = self.browser_session_manager.workspaces
 
         # Naming service for auto-naming chats
         from bassi.core_v3.session_naming import SessionNamingService
+
         self.naming_service = SessionNamingService()
 
         # Create FastAPI app
@@ -133,7 +140,9 @@ class WebUIServerV3:
 
         def pool_factory() -> BassiAgentSession:
             # Create minimal deps for legacy factory
-            from bassi.core_v3.interactive_questions import InteractiveQuestionService
+            from bassi.core_v3.interactive_questions import (
+                InteractiveQuestionService,
+            )
             import uuid
 
             question_service = InteractiveQuestionService()
@@ -145,7 +154,9 @@ class WebUIServerV3:
 
     def _create_capability_factory(self) -> Callable:
         """Create factory for capability discovery."""
-        from bassi.core_v3.interactive_questions import InteractiveQuestionService
+        from bassi.core_v3.interactive_questions import (
+            InteractiveQuestionService,
+        )
         import uuid
 
         def factory(
@@ -181,23 +192,24 @@ class WebUIServerV3:
         # Startup: Initialize agent pool (idempotent - safe to call multiple times)
         @app.on_event("startup")
         async def startup():
-            logger.info(f"🚀 [SERVER] STARTUP EVENT - pool_id={id(self.agent_pool)}, started={self.agent_pool._started}, shutdown={self.agent_pool._shutdown}")
-            if self.agent_pool._started:
-                logger.info("♻️ [SERVER] Agent pool already started (hot reload)")
-                stats = self.agent_pool.get_stats()
-                logger.info(f"♻️ [SERVER] Pool status: {stats['total_agents']} agents, {stats['available']} available")
-            else:
-                logger.info(f"🏊 [SERVER] Starting agent pool with {self.pool_size} agents...")
-                await self.agent_pool.start()
-                stats = self.agent_pool.get_stats()
-                logger.info(
-                    f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, pool_id={id(self.agent_pool)}"
-                )
+            logger.info(
+                f"🚀 [SERVER] STARTUP EVENT - pool_id={id(self.agent_pool)}, started={self.agent_pool._started}, shutdown={self.agent_pool._shutdown}"
+            )
+            # Always call start() - it handles hot reload internally
+            # This ensures _shutdown is properly reset even if _started is True
+            await self.agent_pool.start()
+            stats = self.agent_pool.get_stats()
+            logger.info(
+                f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, "
+                f"available={stats['available']}, pool_id={id(self.agent_pool)}"
+            )
 
         # Shutdown: Only shutdown on real server stop, not hot reload
         @app.on_event("shutdown")
         async def shutdown():
-            logger.info(f"🛑 [SERVER] SHUTDOWN EVENT - pool_id={id(self.agent_pool)}")
+            logger.info(
+                f"🛑 [SERVER] SHUTDOWN EVENT - pool_id={id(self.agent_pool)}"
+            )
             await self.agent_pool.shutdown()
             logger.info("✅ [SERVER] Agent pool shutdown complete")
 
@@ -206,15 +218,19 @@ class WebUIServerV3:
         async def health():
             pool_stats = self.agent_pool.get_stats()
             manager_stats = self.browser_session_manager.get_stats()
-            return JSONResponse({
-                "status": "healthy",
-                # Backward compatibility: flatten key stats to root level
-                "active_connections": manager_stats.get("active_connections", 0),
-                "active_sessions": manager_stats.get("active_chats", 0),
-                # Detailed stats under nested keys
-                "pool": pool_stats,
-                "sessions": manager_stats,
-            })
+            return JSONResponse(
+                {
+                    "status": "healthy",
+                    # Backward compatibility: flatten key stats to root level
+                    "active_connections": manager_stats.get(
+                        "active_connections", 0
+                    ),
+                    "active_sessions": manager_stats.get("active_chats", 0),
+                    # Detailed stats under nested keys
+                    "pool": pool_stats,
+                    "sessions": manager_stats,
+                }
+            )
 
         # Root: Serve index.html
         @app.get("/")
@@ -273,6 +289,7 @@ class WebUIServerV3:
         ):
             """Message processor - delegates to old implementation for now."""
             from bassi.core_v3 import web_server_v3_old
+
             await web_server_v3_old.WebUIServerV3._process_message(
                 self, websocket, data, chat_id
             )
@@ -328,11 +345,18 @@ class WebUIServerV3:
             try:
                 subprocess.run(
                     [
-                        sys.executable, "-m", "uvicorn",
+                        sys.executable,
+                        "-m",
+                        "uvicorn",
                         "bassi.core_v3.web_server_v3:get_app",
-                        "--factory", "--host", "localhost",
-                        "--port", "8765", "--reload",
-                        "--reload-dir", reload_dir,
+                        "--factory",
+                        "--host",
+                        "localhost",
+                        "--port",
+                        "8765",
+                        "--reload",
+                        "--reload-dir",
+                        reload_dir,
                     ],
                     check=True,
                 )
@@ -364,6 +388,8 @@ def create_pool_agent_factory(
         permission_manager: Optional PermissionManager for can_use_tool callback.
                           If provided, enables interactive permission handling.
     """
+    from bassi.core_v3.services.config_service import ConfigService
+    from bassi.core_v3.services.model_service import get_model_id
     from bassi.shared.mcp_registry import create_mcp_registry
     from bassi.shared.permission_config import get_permission_mode
 
@@ -375,14 +401,30 @@ def create_pool_agent_factory(
         )
 
         permission_mode = get_permission_mode()
-        logger.debug(f"🔐 Creating pool agent with permission_mode: {permission_mode}")
+
+        # Get model from config
+        config_service = ConfigService()
+        model_level = config_service.get_default_model_level()
+        model_id = get_model_id(model_level)
+
+        print(
+            f"🤖🤖🤖 [POOL] Creating agent: model={model_id}, permission={permission_mode}"
+        )
+        logger.info(
+            f"🤖 [POOL] Creating agent: model={model_id}, permission={permission_mode}"
+        )
 
         config = SessionConfig(
             allowed_tools=["*"],
+            model_id=model_id,
             permission_mode=permission_mode,
             mcp_servers=mcp_servers,
             setting_sources=["project", "local"],
-            can_use_tool=permission_manager.can_use_tool_callback if permission_manager else None,
+            can_use_tool=(
+                permission_manager.can_use_tool_callback
+                if permission_manager
+                else None
+            ),
         )
         return BassiAgentSession(config)
 
@@ -396,7 +438,10 @@ def create_default_session_factory() -> Callable:
     This creates agents with workspace context, used by tests and
     legacy code paths.
     """
-    from bassi.core_v3.tools import InteractiveQuestionService, create_bassi_tools
+    from bassi.core_v3.tools import (
+        InteractiveQuestionService,
+        create_bassi_tools,
+    )
     from bassi.shared.mcp_registry import create_mcp_registry
     from bassi.shared.permission_config import get_permission_mode
     from bassi.shared.sdk_loader import create_sdk_mcp_server

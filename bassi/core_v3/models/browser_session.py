@@ -16,6 +16,11 @@ from typing import Any, Optional
 
 from fastapi import WebSocket
 
+from bassi.core_v3.services.model_service import (
+    ModelEscalationTracker,
+    get_model_info,
+)
+
 
 @dataclass
 class BrowserSession:
@@ -35,6 +40,7 @@ class BrowserSession:
         current_chat_id: Currently active chat context (or None for new)
         connected_at: When browser connected
         question_service: Service for interactive questions
+        model_tracker: Tracks model level and auto-escalation
     """
 
     browser_id: str
@@ -44,6 +50,9 @@ class BrowserSession:
     connected_at: datetime = field(default_factory=datetime.now)
     question_service: Any = None  # InteractiveQuestionService
     workspace: Any = None  # ChatWorkspace
+    model_tracker: ModelEscalationTracker = field(
+        default_factory=lambda: ModelEscalationTracker()
+    )
 
     def __str__(self) -> str:
         chat = self.current_chat_id[:8] if self.current_chat_id else "new"
@@ -57,5 +66,14 @@ class BrowserSession:
             "connected_at": self.connected_at.isoformat(),
             "has_agent": self.agent is not None,
             "has_workspace": self.workspace is not None,
+            "model_level": self.model_tracker.current_level,
+            "consecutive_failures": self.model_tracker.consecutive_failures,
         }
 
+    def get_model_id(self) -> str:
+        """Get the current model ID string."""
+        return get_model_info(self.model_tracker.current_level).id
+
+    def get_model_state(self) -> dict:
+        """Get the current model state for sending to client."""
+        return self.model_tracker.get_state()

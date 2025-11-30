@@ -263,6 +263,46 @@ body.sidebar-open .main-content {
     display: none;
 }
 
+/* Model icon - color indicates current model level */
+.settings-icon-button#model-icon {
+    position: relative;
+}
+
+.settings-icon-button#model-icon.model-haiku {
+    color: var(--accent-green);
+    border-color: var(--accent-green);
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.settings-icon-button#model-icon.model-sonnet {
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.settings-icon-button#model-icon.model-opus {
+    color: var(--accent-purple);
+    border-color: var(--accent-purple);
+    background: rgba(168, 85, 247, 0.1);
+}
+
+.model-level-badge {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--bg-primary);
+    border: 1px solid currentColor;
+    font-size: 9px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
 /* ========== Settings Button ========== */
 .settings-button {
     background: transparent;
@@ -394,6 +434,89 @@ body.sidebar-open .main-content {
     font-size: 0.875rem;
     color: var(--text-secondary);
     line-height: 1.5;
+}
+
+.setting-divider {
+    height: 1px;
+    background: var(--border);
+    margin: var(--spacing-md) 0;
+}
+
+/* ========== Model Selection ========== */
+.setting-item-model {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+}
+
+.model-selection {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    width: 100%;
+}
+
+.model-option {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.model-option:hover {
+    background: var(--bg-secondary);
+}
+
+.model-option input[type="radio"] {
+    margin-right: var(--spacing-sm);
+    accent-color: var(--accent-purple);
+}
+
+.model-option-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.model-option-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.model-option-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Model option colors */
+.model-option.model-haiku:has(input:checked) {
+    border-color: var(--accent-green);
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.model-option.model-haiku:has(input:checked) .model-option-name {
+    color: var(--accent-green);
+}
+
+.model-option.model-sonnet:has(input:checked) {
+    border-color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.model-option.model-sonnet:has(input:checked) .model-option-name {
+    color: var(--accent-blue);
+}
+
+.model-option.model-opus:has(input:checked) {
+    border-color: var(--accent-purple);
+    background: rgba(168, 85, 247, 0.1);
+}
+
+.model-option.model-opus:has(input:checked) .model-option-name {
+    color: var(--accent-purple);
 }
 
 /* ========== Toggle Switch ========== */
@@ -1470,17 +1593,17 @@ body.hide-thinking .thinking-block {
 
 /* Individual File Chip */
 .file-chip {
-    /* Small pill-shaped chip */
+    /* Card-like file chip */
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    gap: 10px;
+    padding: 10px 14px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    font-size: 12px;
+    border-radius: 12px;
+    font-size: 13px;
     color: var(--text-primary);
-    max-width: 300px;
+    max-width: 280px;
     transition: all var(--transition-fast);
     cursor: default;
     position: relative;
@@ -1489,30 +1612,41 @@ body.hide-thinking .thinking-block {
 /* Image chips have vertical layout with thumbnail */
 .file-chip:has(.file-chip-thumbnail) {
     flex-direction: column;
-    align-items: center;
-    padding: 8px;
-    max-width: 120px;
-    gap: 4px;
+    align-items: stretch;
+    padding: 0;
+    max-width: 160px;
+    min-width: 140px;
+    gap: 0;
+    overflow: hidden;
+    border-radius: 12px;
 }
 
 .file-chip:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--bg-hover);
     border-color: var(--accent-blue);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .file-chip-thumbnail {
-    width: 80px;
-    height: 80px;
+    width: 100%;
+    height: 100px;
     object-fit: cover;
-    border-radius: 8px;
     flex-shrink: 0;
+    border-radius: 0;
+    display: block;
 }
 
 .file-chip-icon {
-    font-size: 14px;
+    font-size: 20px;
     flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-elevated);
+    border-radius: 8px;
 }
 
 .file-chip-name {
@@ -1521,38 +1655,38 @@ body.hide-thinking .thinking-block {
     white-space: nowrap;
     font-weight: 500;
     max-width: 180px;
+    flex: 1;
 }
 
-/* Name in image chips should be centered and smaller */
+/* Name in image chips should be styled differently */
 .file-chip:has(.file-chip-thumbnail) .file-chip-name {
-    text-align: center;
-    font-size: 10px;
-    max-width: 100px;
+    padding: 8px 10px 2px;
+    font-size: 12px;
+    max-width: none;
     width: 100%;
+    box-sizing: border-box;
 }
 
 .file-chip-size {
     font-size: 11px;
     color: var(--text-muted);
     flex-shrink: 0;
-    margin-left: 2px;
 }
 
-/* Size in image chips should be centered and smaller */
+/* Size in image chips */
 .file-chip:has(.file-chip-thumbnail) .file-chip-size {
-    text-align: center;
+    padding: 0 10px 8px;
     width: 100%;
-    margin-left: 0;
-    font-size: 9px;
+    box-sizing: border-box;
+    font-size: 11px;
 }
 
 .file-chip-remove {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
-    margin-left: 2px;
+    width: 20px;
+    height: 20px;
     cursor: pointer;
     color: var(--text-muted);
     opacity: 0.6;
@@ -1560,25 +1694,39 @@ body.hide-thinking .thinking-block {
     font-size: 16px;
     line-height: 1;
     flex-shrink: 0;
-}
-
-/* Remove button in image chips should be positioned absolutely at top-right */
-.file-chip:has(.file-chip-thumbnail) .file-chip-remove {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    background: rgba(0, 0, 0, 0.6);
     border-radius: 50%;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    color: white;
+    background: transparent;
 }
 
 .file-chip-remove:hover {
     opacity: 1;
     color: var(--accent-red);
-    transform: scale(1.1);
+    background: rgba(255, 77, 77, 0.15);
+}
+
+/* Remove button in image chips should be positioned absolutely at top-right */
+.file-chip:has(.file-chip-thumbnail) .file-chip-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    margin: 0;
+    color: white;
+    opacity: 0;
+    font-size: 14px;
+}
+
+.file-chip:has(.file-chip-thumbnail):hover .file-chip-remove {
+    opacity: 1;
+}
+
+.file-chip:has(.file-chip-thumbnail) .file-chip-remove:hover {
+    background: rgba(255, 77, 77, 0.9);
+    color: white;
 }
 
 /* File Preview Tooltip (Claude.ai style) */
@@ -1964,11 +2112,24 @@ body.hide-thinking .thinking-block {
     gap: 4px;
 }
 
-/* Session sidebar toggle button */
-.session-sidebar-toggle {
+/* Session sidebar controls container */
+.session-sidebar-controls {
     position: fixed;
     left: 8px;
     top: 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+    transition: left var(--transition-normal);
+}
+
+.session-sidebar-controls.open {
+    left: 308px; /* 300px sidebar width + 8px margin */
+}
+
+/* Session sidebar toggle button */
+.session-sidebar-toggle {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -1978,8 +2139,7 @@ body.hide-thinking .thinking-block {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    z-index: 100;
-    transition: left var(--transition-normal), background var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
     box-shadow: var(--shadow);
 }
 
@@ -1988,16 +2148,12 @@ body.hide-thinking .thinking-block {
     border-color: var(--accent-blue);
 }
 
-.session-sidebar-toggle.open {
-    left: 308px; /* 300px sidebar width + 8px margin */
-}
-
 .session-sidebar-toggle-icon {
     color: var(--text-secondary);
     transition: transform var(--transition-normal);
 }
 
-.session-sidebar-toggle.open .session-sidebar-toggle-icon {
+.session-sidebar-controls.open .session-sidebar-toggle-icon {
     transform: rotate(180deg);
 }
 
@@ -2019,39 +2175,30 @@ body.hide-thinking .thinking-block {
     background: var(--text-muted);
 }
 
-/* Session sidebar footer */
-.session-sidebar-footer {
-    padding: var(--spacing-lg);
-    border-top: 1px solid var(--border);
-    background: var(--bg-secondary);
-}
-
+/* New session button (matches toggle button design) */
 .new-session-button {
-    width: 100%;
-    background: var(--accent-blue);
-    color: white;
-    border: none;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    padding: var(--spacing-md) var(--spacing-lg);
-    font-family: var(--font-sans);
-    font-size: 0.95rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--transition-fast);
+    width: 36px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--spacing-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+    box-shadow: var(--shadow);
+    color: var(--text-secondary);
 }
 
 .new-session-button:hover {
-    background: var(--accent-cyan);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
+    background: var(--bg-hover);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
 }
 
 .new-session-button:active {
-    transform: translateY(0);
+    background: var(--bg-secondary);
 }
 
 /* Session list empty state */
@@ -2069,7 +2216,7 @@ body.hide-thinking .thinking-block {
         width: 250px;
     }
 
-    .session-sidebar-toggle.open {
+    .session-sidebar-controls.open {
         left: 258px; /* 250px sidebar width + 8px margin */
     }
 

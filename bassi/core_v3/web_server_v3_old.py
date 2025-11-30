@@ -1687,31 +1687,87 @@ Now continue with the interrupted task/plan/intention. Go on..."""
             # User responded to permission request
             tool_name = data.get("tool_name")
             scope = data.get("scope")
-            logger.info(f"Permission response received: {tool_name} → {scope}")
+            logger.info(
+                f"Permission response received: {tool_name} → {scope}"
+            )
 
             # Handle the permission response
-            self.permission_manager.handle_permission_response(tool_name, scope)
+            self.permission_manager.handle_permission_response(
+                tool_name, scope
+            )
 
         elif msg_type == "permission_change":
             # User changed global permission setting
             bypass_enabled = data.get("bypass_permissions", False)
             new_mode = "bypassPermissions" if bypass_enabled else "default"
-            logger.info(f"🔐 Permission change received: bypass={bypass_enabled}, mode={new_mode}")
+            logger.info(
+                f"🔐 Permission change received: bypass={bypass_enabled}, mode={new_mode}"
+            )
 
             try:
                 await session.set_permission_mode(new_mode)
-                await websocket.send_json({
-                    "type": "permission_updated",
-                    "mode": new_mode,
-                    "bypass_enabled": bypass_enabled,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "permission_updated",
+                        "mode": new_mode,
+                        "bypass_enabled": bypass_enabled,
+                    }
+                )
                 logger.info(f"✅ Permission mode updated to: {new_mode}")
             except Exception as e:
-                logger.error(f"❌ Failed to update permission mode: {e}", exc_info=True)
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Failed to update permission mode: {str(e)}",
-                })
+                logger.error(
+                    f"❌ Failed to update permission mode: {e}", exc_info=True
+                )
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Failed to update permission mode: {str(e)}",
+                    }
+                )
+
+        elif msg_type == "model_change":
+            # User changed model level
+            from bassi.core_v3.services.model_service import get_model_info
+
+            model_level = data.get("model_level", 1)
+            logger.info(f"🤖 Model change received: level={model_level}")
+
+            try:
+                # Get browser session from manager
+                browser_session = (
+                    self.browser_session_manager.get_session_by_chat_id(
+                        connection_id
+                    )
+                )
+                if browser_session and browser_session.model_tracker:
+                    browser_session.model_tracker.set_level(model_level)
+                    model_info = get_model_info(model_level)
+
+                    await websocket.send_json(
+                        {
+                            "type": "model_changed",
+                            "model_level": model_level,
+                            "model_name": model_info.name,
+                            "reason": "user_selection",
+                        }
+                    )
+                    logger.info(
+                        f"✅ Model level updated to: {model_level} ({model_info.name})"
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ No browser session found for model change"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to update model level: {e}", exc_info=True
+                )
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Failed to update model: {str(e)}",
+                    }
+                )
 
         else:
             logger.warning(f"Unknown message type: {msg_type}")

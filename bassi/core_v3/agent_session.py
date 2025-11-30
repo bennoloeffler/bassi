@@ -43,7 +43,9 @@ class SessionConfig:
 
     # Model configuration
     model_id: str = "claude-sonnet-4-5-20250929"
-    thinking_mode: bool = False  # Enable extended thinking via thinking parameter (not model suffix)
+    thinking_mode: bool = (
+        False  # Enable extended thinking via thinking parameter (not model suffix)
+    )
 
     # MCP servers
     mcp_servers: dict[str, Any] = field(default_factory=dict)
@@ -156,19 +158,21 @@ class BassiAgentSession:
         self.session_id = session_id
         self.current_workspace_id = session_id
 
-    async def prepare_for_session(self, session_id: str, resume: bool) -> None:
+    async def prepare_for_session(
+        self, session_id: str, resume: bool
+    ) -> None:
         """
         Prepare agent for a new or resumed session.
 
         With pool architecture, we keep the SDK client connected and just
         reset in-memory state. The SDK manages server-side conversation
         state via session_id passed to each query.
-        
+
         NOTE: We do NOT disconnect/reconnect here because:
         1. The SDK client may be connected from a different async task (pool startup)
         2. Disconnecting from a different task causes "cancel scope" errors
         3. The SDK's session_id parameter handles conversation isolation
-        
+
         Args:
             session_id: The chat ID to use for this session
             resume: Whether this is resuming an existing chat (loads history)
@@ -259,7 +263,7 @@ class BassiAgentSession:
         1. Clears existing message history
         2. Stores a conversation summary for context injection
         3. Populates message_history for local tracking
-        
+
         NOTE: Since we don't reconnect the SDK (to avoid cancel scope errors),
         we store a summary that gets prepended to the next query to give
         the agent context about the previous conversation.
@@ -288,31 +292,39 @@ class BassiAgentSession:
         # Build FULL conversation context for injection
         # The SDK doesn't persist history across agent pool reuse, so we inject it
         # Use full messages with a character limit to avoid exceeding context window
-        MAX_CONTEXT_CHARS = 50000  # ~12k tokens, safe for Claude's context
-        
+        max_context_chars = 50000  # ~12k tokens, safe for Claude's context
+
         if history:
-            context_lines = ["[CONVERSATION HISTORY - You are continuing this chat:]"]
+            context_lines = [
+                "[CONVERSATION HISTORY - You are continuing this chat:]"
+            ]
             total_chars = len(context_lines[0])
-            
+
             # Start from oldest, but we may need to truncate old messages if too long
             for msg in history:
                 role = msg["role"].upper()
                 content = msg["content"]
                 line = f"\n{role}: {content}"
-                
-                if total_chars + len(line) > MAX_CONTEXT_CHARS:
+
+                if total_chars + len(line) > max_context_chars:
                     # Would exceed limit - truncate remaining messages
-                    context_lines.append(f"\n[...earlier messages truncated...]")
+                    context_lines.append(
+                        "\n[...earlier messages truncated...]"
+                    )
                     # Add the last few messages that fit
-                    remaining = MAX_CONTEXT_CHARS - total_chars - 100
+                    remaining = max_context_chars - total_chars - 100
                     if remaining > 0 and len(content) > 0:
-                        context_lines.append(f"\n{role}: {content[:remaining]}...")
+                        context_lines.append(
+                            f"\n{role}: {content[:remaining]}..."
+                        )
                     break
-                
+
                 context_lines.append(line)
                 total_chars += len(line)
-            
-            context_lines.append("\n[END OF HISTORY - Continue the conversation from here.]")
+
+            context_lines.append(
+                "\n[END OF HISTORY - Continue the conversation from here.]"
+            )
             self._conversation_context = "".join(context_lines)
             logger.info(
                 f"📝 [SESSION] Built FULL conversation context: "
@@ -435,17 +447,23 @@ class BassiAgentSession:
         # This gives the agent context about previous messages since SDK session may not persist
         if self._conversation_context:
             import logging
+
             logger = logging.getLogger(__name__)
-            logger.info("📝 [SESSION] Injecting conversation context into prompt")
-            
+            logger.info(
+                "📝 [SESSION] Injecting conversation context into prompt"
+            )
+
             if isinstance(prompt, list):
                 # Multimodal: prepend context as first text block
-                context_block = {"type": "text", "text": self._conversation_context + "\n\n"}
+                context_block = {
+                    "type": "text",
+                    "text": self._conversation_context + "\n\n",
+                }
                 prompt = [context_block] + prompt
             else:
                 # Text: prepend context to string
                 prompt = self._conversation_context + "\n\n" + prompt
-            
+
             # Clear context after first use (don't repeat in subsequent queries)
             self._conversation_context = None
 
@@ -500,8 +518,9 @@ class BassiAgentSession:
             mode: 'default', 'acceptEdits', or 'bypassPermissions'
         """
         import logging
+
         logger = logging.getLogger(__name__)
-        
+
         if not self._connected or not self.client:
             logger.warning("⚠️ Cannot set permission mode: not connected")
             return
@@ -509,6 +528,25 @@ class BassiAgentSession:
         logger.info(f"🔐 [SESSION] Setting permission mode to: {mode}")
         await self.client.set_permission_mode(mode)
         self.config.permission_mode = mode
+
+    async def set_model(self, model_id: str) -> None:
+        """
+        Change the AI model during conversation.
+
+        Args:
+            model_id: Model ID string (e.g., 'claude-haiku-4-5-20250929')
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not self._connected or not self.client:
+            logger.warning("⚠️ Cannot set model: not connected")
+            return
+
+        logger.info(f"🤖 [SESSION] Changing model to: {model_id}")
+        await self.client.set_model(model_id)
+        self.config.model_id = model_id
 
     async def get_server_info(self) -> dict[str, Any] | None:
         """

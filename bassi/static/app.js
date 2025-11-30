@@ -82,6 +82,7 @@ class BassiWebClient {
         // Session sidebar elements
         this.sessionSidebar = document.getElementById('session-sidebar')
         this.sessionSidebarToggle = document.getElementById('session-sidebar-toggle')
+        this.sessionSidebarControls = this.sessionSidebarToggle?.parentElement  // Container for toggle + new session buttons
         this.sessionList = document.getElementById('session-list')
         this.sessionSearch = document.getElementById('session-search')
         this.newSessionButton = document.getElementById('new-session-button')
@@ -279,11 +280,17 @@ class BassiWebClient {
             // Backend returns path like "DATA_FROM_USER/test_document_88fd1df3fb2ec431.txt"
             // Extract just the filename
             const filename = file.path.split('/').pop()
+            const fileType = this.getFileType({ name: filename, type: this.getMimeType(filename) })
+
             return {
-                filename: filename,  // Use 'filename' to match addFileToStaging() format
+                id: `session_${file.path.replace(/[^a-z0-9]/gi, '_')}`,
+                filename: filename,
                 size: file.size,
-                uploadedPath: file.path,
-                isSessionFile: true  // Mark as already persisted
+                type: fileType,
+                saved_path: file.path,
+                media_type: this.getMimeType(filename),
+                data: null,  // Will be loaded for images
+                isSessionFile: true
             }
         })
 
@@ -292,12 +299,75 @@ class BassiWebClient {
         for (const sessionFile of sessionStagedFiles) {
             if (!existingNames.has(sessionFile.filename)) {
                 this.stagedFiles.push(sessionFile)
+
+                // Load image data for preview if it's an image
+                if (sessionFile.type === 'image') {
+                    this.loadImagePreview(sessionFile)
+                }
             }
         }
 
         // Update UI
         this.renderFileChips()
         this.renderFileList()
+    }
+
+    getMimeType(filename) {
+        /**
+         * Get MIME type from filename extension.
+         */
+        const ext = filename.toLowerCase().split('.').pop()
+        const mimeTypes = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'webp': 'image/webp',
+            'svg': 'image/svg+xml',
+            'bmp': 'image/bmp',
+            'pdf': 'application/pdf',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt': 'application/vnd.ms-powerpoint',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'txt': 'text/plain',
+            'md': 'text/markdown',
+            'json': 'application/json',
+            'csv': 'text/csv'
+        }
+        return mimeTypes[ext] || 'application/octet-stream'
+    }
+
+    async loadImagePreview(fileData) {
+        /**
+         * Load image data from server for preview.
+         */
+        if (!this.sessionId || !fileData.saved_path) return
+
+        try {
+            // Fetch image from server
+            const response = await fetch(`/api/sessions/${this.sessionId}/file/${encodeURIComponent(fileData.saved_path)}`)
+            if (!response.ok) return
+
+            const blob = await response.blob()
+            const reader = new FileReader()
+
+            reader.onload = () => {
+                const dataUrl = reader.result
+                const [header, base64Data] = dataUrl.split(',')
+                fileData.data = base64Data
+                fileData.media_type = header.match(/:(.*?);/)?.[1] || fileData.media_type
+
+                // Re-render to show the image
+                this.renderFileChips()
+            }
+
+            reader.readAsDataURL(blob)
+        } catch (error) {
+            console.warn('Failed to load image preview:', fileData.filename, error)
+        }
     }
 
     toggleFileList() {
@@ -317,45 +387,14 @@ class BassiWebClient {
 
     renderFileList() {
         /**
-         * Render the complete session file list.
+         * Update session file state.
+         * NOTE: The separate session files list was removed to avoid duplication.
+         * Session files are now shown only in the file chips area.
          */
-        const fileCount = this.sessionFiles.length
-
-        // Update count display
-        this.fileListCount.textContent = `📁 ${fileCount} file${fileCount !== 1 ? 's' : ''} in session`
-
-        // Show/hide file list area
-        if (fileCount > 0) {
-            this.fileListArea.style.display = 'block'
-        } else {
+        // Hide the legacy file list area (files are shown in chips only)
+        if (this.fileListArea) {
             this.fileListArea.style.display = 'none'
-            return
         }
-
-        // Render file list items
-        if (fileCount === 0) {
-            this.fileListContent.innerHTML = '<div class="file-list-empty">No files uploaded yet</div>'
-            return
-        }
-
-        const fileItems = this.sessionFiles.map(file => {
-            const fileSize = this.formatFileSize(file.size)
-            const uploadDate = new Date(file.uploaded_at).toLocaleString()
-
-            return `
-                <div class="file-list-item">
-                    <div class="file-list-item-icon">📄</div>
-                    <div class="file-list-item-info">
-                        <div class="file-list-item-name">${this.escapeHtml(file.name)}</div>
-                        <div class="file-list-item-meta">
-                            ${fileSize} • Uploaded ${uploadDate}
-                        </div>
-                    </div>
-                </div>
-            `
-        }).join('')
-
-        this.fileListContent.innerHTML = fileItems
     }
 
     formatFileSize(bytes) {
@@ -395,6 +434,34 @@ class BassiWebClient {
 
         // Load global bypass setting from backend
         this.loadGlobalBypassSetting()
+
+        // Load model settings from backend
+        this.loadModelSettings()
+
+        // Model icon click opens settings
+        const modelIcon = document.getElementById('model-icon')
+        if (modelIcon) {
+            modelIcon.addEventListener('click', () => {
+                settingsModal.style.display = 'flex'
+            })
+        }
+
+        // Model level radio buttons
+        const modelRadios = document.querySelectorAll('input[name="model-level"]')
+        modelRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const level = parseInt(e.target.value, 10)
+                this.updateModelLevel(level)
+            })
+        })
+
+        // Auto-escalate toggle
+        const autoEscalateToggle = document.getElementById('auto-escalate-toggle')
+        if (autoEscalateToggle) {
+            autoEscalateToggle.addEventListener('change', (e) => {
+                this.updateAutoEscalate(e.target.checked)
+            })
+        }
 
         // Open settings modal (from gear button or status icons)
         const openSettingsModal = () => {
@@ -580,6 +647,165 @@ class BassiWebClient {
                 'error'
             )
         }
+    }
+
+    // ========== Model Settings ==========
+
+    async loadModelSettings() {
+        // Load model settings from backend
+        try {
+            const response = await fetch('/api/settings/model')
+            if (response.ok) {
+                const data = await response.json()
+                this.currentModelLevel = data.model_level
+                this.autoEscalate = data.auto_escalate
+
+                // Update radio buttons
+                const radioBtn = document.querySelector(`input[name="model-level"][value="${data.model_level}"]`)
+                if (radioBtn) {
+                    radioBtn.checked = true
+                }
+
+                // Update auto-escalate toggle
+                const autoEscalateToggle = document.getElementById('auto-escalate-toggle')
+                if (autoEscalateToggle) {
+                    autoEscalateToggle.checked = data.auto_escalate
+                }
+
+                // Update model icon
+                this.updateModelIcon(data.model_level, data.model_info?.name)
+
+                console.log(`🤖 Model settings loaded: level=${data.model_level}, auto_escalate=${data.auto_escalate}`)
+            }
+        } catch (error) {
+            console.error('Failed to load model settings:', error)
+        }
+    }
+
+    updateModelIcon(level, modelName) {
+        const modelIcon = document.getElementById('model-icon')
+        if (!modelIcon) return
+
+        // Remove all model classes
+        modelIcon.classList.remove('model-haiku', 'model-sonnet', 'model-opus')
+
+        // Add correct class based on level
+        const modelClasses = { 1: 'model-haiku', 2: 'model-sonnet', 3: 'model-opus' }
+        const modelNames = { 1: 'Haiku 4.5', 2: 'Sonnet 4.5', 3: 'Opus 4.5' }
+        modelIcon.classList.add(modelClasses[level] || 'model-haiku')
+
+        // Update badge
+        const badge = modelIcon.querySelector('.model-level-badge')
+        if (badge) {
+            badge.textContent = level
+        }
+
+        // Update tooltip
+        modelIcon.title = `Model: ${modelName || modelNames[level]}`
+    }
+
+    async updateModelLevel(level) {
+        // Update model level on backend
+        try {
+            const response = await fetch('/api/settings/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_level: level })
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                this.currentModelLevel = data.model_level
+                this.updateModelIcon(data.model_level, data.model_info?.name)
+
+                // Notify WebSocket about model change
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'model_change',
+                        model_level: data.model_level
+                    }))
+                    console.log(`🤖 Notified agent of model change: level=${data.model_level}`)
+                }
+
+                this.showNotification(
+                    `Model changed to ${data.model_info?.name || 'level ' + level}`,
+                    'success'
+                )
+                console.log(`✅ Model level updated: ${level}`)
+            } else {
+                throw new Error('Failed to update model')
+            }
+        } catch (error) {
+            console.error('Failed to update model level:', error)
+            this.showNotification('Failed to update model', 'error')
+
+            // Revert radio button
+            if (this.currentModelLevel) {
+                const radioBtn = document.querySelector(`input[name="model-level"][value="${this.currentModelLevel}"]`)
+                if (radioBtn) radioBtn.checked = true
+            }
+        }
+    }
+
+    async updateAutoEscalate(enabled) {
+        // Update auto-escalate setting on backend
+        try {
+            const response = await fetch('/api/settings/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ auto_escalate: enabled })
+            })
+
+            if (response.ok) {
+                this.autoEscalate = enabled
+                console.log(`✅ Auto-escalate updated: ${enabled}`)
+            } else {
+                throw new Error('Failed to update auto-escalate')
+            }
+        } catch (error) {
+            console.error('Failed to update auto-escalate:', error)
+
+            // Revert toggle
+            const toggle = document.getElementById('auto-escalate-toggle')
+            if (toggle) toggle.checked = !enabled
+        }
+    }
+
+    handleModelChanged(data) {
+        // Handle model_changed event from WebSocket (e.g., auto-escalation)
+        const { model_level, model_name, reason } = data
+
+        this.currentModelLevel = model_level
+        this.updateModelIcon(model_level, model_name)
+
+        // Update radio button
+        const radioBtn = document.querySelector(`input[name="model-level"][value="${model_level}"]`)
+        if (radioBtn) radioBtn.checked = true
+
+        // Show notification for auto-escalation
+        if (reason === 'auto_escalation') {
+            this.showNotification(
+                `Model upgraded to ${model_name} after consecutive failures`,
+                'info'
+            )
+            // Also add a system message to the conversation
+            this.addSystemMessage(`Model automatically upgraded to ${model_name} after 3 consecutive errors`)
+        }
+
+        console.log(`🤖 Model changed: level=${model_level}, reason=${reason}`)
+    }
+
+    addSystemMessage(text) {
+        // Add a system message to the conversation
+        const message = document.createElement('div')
+        message.className = 'message system-message'
+        message.innerHTML = `
+            <div class="message-content">
+                <div class="system-text">${text}</div>
+            </div>
+        `
+        this.conversationEl.appendChild(message)
+        this.scrollToBottom()
     }
 
     showNotification(message, type = 'info') {
@@ -1545,10 +1771,23 @@ class BassiWebClient {
         this.fileChipsContainer.style.display = 'block'
         this.fileChipsContainer.classList.add('has-files')
 
-        // Update file count
+        // Update file count with session info
         if (this.fileChipsCount) {
-            const fileText = this.stagedFiles.length === 1 ? 'file' : 'files'
-            this.fileChipsCount.textContent = `${this.stagedFiles.length} ${fileText}`
+            const totalFiles = this.stagedFiles.length
+            const sessionFileCount = this.stagedFiles.filter(f => f.isSessionFile).length
+            const newFileCount = totalFiles - sessionFileCount
+
+            let countText
+            if (sessionFileCount > 0 && newFileCount > 0) {
+                countText = `📎 ${totalFiles} files (${newFileCount} new, ${sessionFileCount} in session)`
+            } else if (sessionFileCount > 0) {
+                const fileText = sessionFileCount === 1 ? 'file' : 'files'
+                countText = `📁 ${sessionFileCount} ${fileText} in session`
+            } else {
+                const fileText = totalFiles === 1 ? 'file' : 'files'
+                countText = `📎 ${totalFiles} ${fileText}`
+            }
+            this.fileChipsCount.textContent = countText
         }
 
         // Setup toggle functionality
@@ -1568,10 +1807,6 @@ class BassiWebClient {
             const chip = document.createElement('div')
             chip.className = 'file-chip'
             chip.dataset.fileId = file.id
-
-            // Add tooltip with full name and size
-            const fullInfo = `${file.filename}\nSize: ${this.formatFileSize(file.size)}\nLocation: ${file.saved_path}`
-            chip.title = fullInfo
 
             // For images: show thumbnail
             if (file.type === 'image' && file.data) {
@@ -2034,6 +2269,11 @@ class BassiWebClient {
             case 'permission_request':
                 // Agent requesting permission to use a tool
                 this.handlePermissionRequest(msg)
+                break
+
+            case 'model_changed':
+                // Model was changed (e.g., auto-escalation)
+                this.handleModelChanged(msg)
                 break
 
             default:
@@ -3854,13 +4094,13 @@ class BassiWebClient {
          */
         if (this.sessionSidebarOpen) {
             this.sessionSidebar.classList.add('open')
-            this.sessionSidebarToggle.classList.add('open')
+            this.sessionSidebarControls?.classList.add('open')
             document.body.classList.add('sidebar-open')
             // Reload sessions when opening
             this.loadSessions()
         } else {
             this.sessionSidebar.classList.remove('open')
-            this.sessionSidebarToggle.classList.remove('open')
+            this.sessionSidebarControls?.classList.remove('open')
             document.body.classList.remove('sidebar-open')
         }
     }

@@ -59,7 +59,11 @@ class BrowserSessionManager:
         self.agent_pool = agent_pool
         self.chat_index = chat_index
         # Ensure workspace_base_path is a Path object
-        self.workspace_base_path = Path(workspace_base_path) if isinstance(workspace_base_path, str) else workspace_base_path
+        self.workspace_base_path = (
+            Path(workspace_base_path)
+            if isinstance(workspace_base_path, str)
+            else workspace_base_path
+        )
         self.permission_manager = permission_manager
 
         # Active browser sessions: browser_id -> BrowserSession
@@ -106,19 +110,25 @@ class BrowserSessionManager:
         )
 
         # Send initial status
-        await websocket.send_json({
-            "type": "status",
-            "message": "🔌 Acquiring agent...",
-        })
+        await websocket.send_json(
+            {
+                "type": "status",
+                "message": "🔌 Acquiring agent...",
+            }
+        )
 
         browser_session: Optional[BrowserSession] = None
         connection_established = False
 
         try:
             # Acquire agent from pool
-            logger.info(f"🔶 [WS] Acquiring agent for browser {browser_id[:8]}...")
+            logger.info(
+                f"🔶 [WS] Acquiring agent for browser {browser_id[:8]}..."
+            )
             agent = await self.agent_pool.acquire(browser_id, timeout=30)
-            logger.info(f"✅ [WS] Agent acquired for browser {browser_id[:8]}")
+            logger.info(
+                f"✅ [WS] Agent acquired for browser {browser_id[:8]}"
+            )
 
             # Determine chat context
             chat_id = await self._resolve_chat_id(requested_chat_id)
@@ -145,6 +155,7 @@ class BrowserSessionManager:
 
             # Update permission mode if user changed settings
             from bassi.shared.permission_config import get_permission_mode
+
             current_permission_mode = get_permission_mode()
             if agent.config.permission_mode != current_permission_mode:
                 logger.info(
@@ -159,6 +170,19 @@ class BrowserSessionManager:
             agent.question_service = question_service
             agent.current_workspace_id = chat_id
 
+            # Get model settings from config service
+            from bassi.core_v3.services.config_service import ConfigService
+            from bassi.core_v3.services.model_service import (
+                ModelEscalationTracker,
+            )
+
+            config_service = ConfigService()
+            model_settings = config_service.get_model_settings()
+            model_tracker = ModelEscalationTracker(
+                current_level=model_settings["default_model_level"],
+                auto_escalate=model_settings["auto_escalate"],
+            )
+
             # Create browser session
             browser_session = BrowserSession(
                 browser_id=browser_id,
@@ -167,6 +191,7 @@ class BrowserSessionManager:
                 current_chat_id=chat_id,
                 question_service=question_service,
                 workspace=workspace,
+                model_tracker=model_tracker,
             )
             self.browser_sessions[browser_id] = browser_session
 
@@ -184,13 +209,17 @@ class BrowserSessionManager:
             connection_established = True
 
             # Send connected event
-            await websocket.send_json({
-                "type": "connected",
-                "chat_id": chat_id,
-                "session_id": chat_id,  # Backward compatibility
-                "browser_id": browser_id,
-            })
-            logger.info(f"✅ [WS] Browser {browser_id[:8]} connected to chat {chat_id[:8]}")
+            await websocket.send_json(
+                {
+                    "type": "connected",
+                    "chat_id": chat_id,
+                    "session_id": chat_id,  # Backward compatibility
+                    "browser_id": browser_id,
+                }
+            )
+            logger.info(
+                f"✅ [WS] Browser {browser_id[:8]} connected to chat {chat_id[:8]}"
+            )
 
             # Run message loop
             if message_processor:
@@ -223,7 +252,9 @@ class BrowserSessionManager:
     async def _setup_workspace(self, chat_id: str) -> ChatWorkspace:
         """Load existing workspace or create new one."""
         if ChatWorkspace.exists(chat_id, base_path=self.workspace_base_path):
-            workspace = ChatWorkspace.load(chat_id, base_path=self.workspace_base_path)
+            workspace = ChatWorkspace.load(
+                chat_id, base_path=self.workspace_base_path
+            )
             logger.info(
                 f"✅ [WS] Loaded workspace: {chat_id[:8]} "
                 f"(files: {workspace.metadata.get('file_count', 0)})"
@@ -238,7 +269,9 @@ class BrowserSessionManager:
 
         return workspace
 
-    async def _restore_conversation(self, agent: Any, workspace: ChatWorkspace) -> None:
+    async def _restore_conversation(
+        self, agent: Any, workspace: ChatWorkspace
+    ) -> None:
         """Restore conversation history from workspace."""
         logger.info("🔷 [WS] Loading conversation history...")
         history = workspace.load_conversation_history()
@@ -248,24 +281,32 @@ class BrowserSessionManager:
         else:
             logger.info("ℹ️ [WS] No history to restore")
 
-    async def _ensure_agent_connected(self, websocket: WebSocket, agent: Any) -> None:
+    async def _ensure_agent_connected(
+        self, websocket: WebSocket, agent: Any
+    ) -> None:
         """Ensure agent is connected (pool agents should already be connected)."""
         if agent._connected:
-            await websocket.send_json({
-                "type": "status",
-                "message": "✅ Agent ready",
-            })
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": "✅ Agent ready",
+                }
+            )
         else:
             logger.warning("⚠️ [WS] Agent not connected, connecting...")
-            await websocket.send_json({
-                "type": "status",
-                "message": "🔌 Connecting to Claude...",
-            })
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": "🔌 Connecting to Claude...",
+                }
+            )
             await agent.connect()
-            await websocket.send_json({
-                "type": "status",
-                "message": "✅ Connected to Claude",
-            })
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": "✅ Connected to Claude",
+                }
+            )
 
     async def _message_loop(
         self,
@@ -311,8 +352,13 @@ class BrowserSessionManager:
 
             # Clean up empty chats if connection failed
             if not connection_established and browser_session.workspace:
-                if browser_session.workspace.metadata.get("message_count", 0) == 0:
-                    logger.info(f"🧹 [WS] Deleting empty chat: {chat_id[:8]}...")
+                if (
+                    browser_session.workspace.metadata.get("message_count", 0)
+                    == 0
+                ):
+                    logger.info(
+                        f"🧹 [WS] Deleting empty chat: {chat_id[:8]}..."
+                    )
                     try:
                         self.chat_index.remove_chat(chat_id)
                         browser_session.workspace.delete()
@@ -403,13 +449,24 @@ class BrowserSessionManager:
         logger.info(f"✅ [WS] Switched to chat {new_chat_id[:8]}")
         return True
 
-    def get_browser_session(self, browser_id: str) -> Optional[BrowserSession]:
+    def get_browser_session(
+        self, browser_id: str
+    ) -> Optional[BrowserSession]:
         """Get browser session by ID."""
         return self.browser_sessions.get(browser_id)
 
     def get_session_by_chat(self, chat_id: str) -> Optional[Any]:
         """Get agent session for a chat (backward compatibility)."""
         return self.active_sessions.get(chat_id)
+
+    def get_session_by_chat_id(
+        self, chat_id: str
+    ) -> Optional[BrowserSession]:
+        """Get BrowserSession by chat ID."""
+        for browser_session in self.browser_sessions.values():
+            if browser_session.current_chat_id == chat_id:
+                return browser_session
+        return None
 
     def get_workspace(self, chat_id: str) -> Optional[ChatWorkspace]:
         """Get workspace for a chat (backward compatibility)."""
@@ -423,4 +480,3 @@ class BrowserSessionManager:
             "active_chats": len(self.active_sessions),
             "pool_stats": self.agent_pool.get_stats(),
         }
-

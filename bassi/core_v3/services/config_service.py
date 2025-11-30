@@ -37,9 +37,7 @@ class ConfigService:
                 "created_at": None,  # Will be set on first save
             }
             self._save_config(default_config)
-            LOGGER.info(
-                f"Created default config at {self.config_path}"
-            )
+            LOGGER.info(f"Created default config at {self.config_path}")
 
     def _load_config(self) -> dict:
         """Load configuration from disk"""
@@ -47,9 +45,7 @@ class ConfigService:
             with open(self.config_path, "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            LOGGER.warning(
-                f"Failed to load config: {e}, using defaults"
-            )
+            LOGGER.warning(f"Failed to load config: {e}, using defaults")
             return {"global_bypass_permissions": True}
 
     def _save_config(self, config: dict):
@@ -108,3 +104,82 @@ class ConfigService:
         config["persistent_permissions"] = tool_names
         self._save_config(config)
         LOGGER.info(f"Persistent permissions updated: {tool_names}")
+
+    # ========== Model Settings ==========
+
+    def get_default_model_level(self) -> int:
+        """Get default model level for new sessions.
+
+        Returns:
+            Model level (1=Haiku, 2=Sonnet, 3=Opus), default 1
+        """
+        config = self._load_config()
+        return config.get("default_model_level", 1)
+
+    def set_default_model_level(self, level: int) -> None:
+        """Set default model level for new sessions.
+
+        Args:
+            level: Model level (1-3)
+
+        Raises:
+            ValueError: If level is not 1-3
+        """
+        if level not in (1, 2, 3):
+            raise ValueError(f"Invalid model level: {level}. Must be 1-3.")
+        config = self._load_config()
+        config["default_model_level"] = level
+        self._save_config(config)
+        LOGGER.info(f"Default model level set to: {level}")
+
+    def get_auto_escalate(self) -> bool:
+        """Get whether auto-escalation is enabled.
+
+        Returns:
+            True if auto-escalate on failures (default: True)
+        """
+        config = self._load_config()
+        return config.get("auto_escalate", True)
+
+    def set_auto_escalate(self, enabled: bool) -> None:
+        """Set whether auto-escalation is enabled.
+
+        Args:
+            enabled: True to enable auto-escalation
+        """
+        config = self._load_config()
+        config["auto_escalate"] = enabled
+        self._save_config(config)
+        LOGGER.info(f"Auto-escalate set to: {enabled}")
+
+    def get_model_settings(self) -> dict:
+        """Get all model-related settings.
+
+        Returns:
+            Dict with default_model_level and auto_escalate
+        """
+        config = self._load_config()
+        return {
+            "default_model_level": config.get("default_model_level", 1),
+            "auto_escalate": config.get("auto_escalate", True),
+        }
+
+    def set_model_settings(
+        self,
+        model_level: Optional[int] = None,
+        auto_escalate: Optional[bool] = None,
+    ) -> dict:
+        """Update model settings.
+
+        Args:
+            model_level: New default model level (1-3), or None to keep current
+            auto_escalate: New auto-escalate setting, or None to keep current
+
+        Returns:
+            Updated settings dict
+        """
+        if model_level is not None:
+            self.set_default_model_level(model_level)
+        if auto_escalate is not None:
+            self.set_auto_escalate(auto_escalate)
+        return self.get_model_settings()

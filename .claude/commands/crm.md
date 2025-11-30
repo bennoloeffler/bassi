@@ -62,6 +62,14 @@ Analyze the user's text and extract:
 - Related opportunity
 - Metadata (any additional info)
 
+### File/Attachment Information
+- Filename (required)
+- File type: pdf, image, docx, pptx, xlsx, email, other
+- Source: email_attachment, user_upload, agent_download
+- Related person, company, event, or opportunity
+- Description
+- Tags
+
 ## Actions to Perform
 
 Based on the user's request, perform one or more of these actions:
@@ -85,6 +93,12 @@ Based on the user's request, perform one or more of these actions:
 ### ANALYZE
 - Query and summarize CRM data
 - Generate reports, statistics, insights
+
+### FILE OPERATIONS
+- Upload files from _DATA_FROM_USER to CRM
+- Extract and store email attachments from MS365
+- Search files by extracted text content
+- List files for a person, company, or opportunity
 
 ## Workflow
 
@@ -143,6 +157,46 @@ FROM company_site
 WHERE name ILIKE '%acme%'
 ORDER BY created_at DESC
 LIMIT 10;
+```
+
+### Store an email attachment
+```sql
+INSERT INTO data_files (
+    person_id, filename, file_type, mime_type, file_size_bytes,
+    source, source_email_id, file_data, email_metadata
+) VALUES (
+    1, 'contract.pdf', 'pdf', 'application/pdf', 245678,
+    'email_attachment', 'AAMkAGI2TG93AAA=',
+    '<base64-from-ms365-attachment>',
+    '{"subject": "Contract", "from": {"email": "john@example.com"}}'::jsonb
+) RETURNING id, filename;
+```
+
+### Upload a file from _DATA_FROM_USER
+```sql
+INSERT INTO data_files (
+    company_site_id, filename, file_type, mime_type,
+    source, source_path, file_data
+) VALUES (
+    5, 'proposal.pdf', 'pdf', 'application/pdf',
+    'user_upload', '_DATA_FROM_USER/proposal.pdf',
+    '<base64-encoded-content>'
+) RETURNING id, filename;
+```
+
+### Search files by content
+```sql
+SELECT id, filename, person_id, company_site_id
+FROM data_files
+WHERE to_tsvector('german', extracted_text) @@ to_tsquery('german', 'Vertrag');
+```
+
+### List files for a person
+```sql
+SELECT id, filename, file_type, file_size_bytes, source, created_at
+FROM data_files
+WHERE person_id = 1
+ORDER BY created_at DESC;
 ```
 
 ## Response Format

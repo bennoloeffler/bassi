@@ -19,13 +19,13 @@ Usage:
     # Get or create singleton pool
     pool = get_agent_pool(size=5, agent_factory=my_factory)
     await pool.start()  # Only starts if not already started
-    
+
     # On browser connect:
     agent = await pool.acquire(timeout=30)
-    
+
     # On browser disconnect:
     await pool.release(agent)
-    
+
     # On REAL server shutdown (not hot reload):
     await pool.shutdown()
 """
@@ -53,19 +53,19 @@ def get_agent_pool(
 ) -> "AgentPool":
     """
     Get or create the global agent pool singleton.
-    
+
     The pool persists across hot reloads so agents stay connected.
-    
+
     Args:
         size: Number of agents (only used on first call)
         agent_factory: Factory to create agents (only used on first call)
         acquire_timeout: Timeout for acquiring agents
-        
+
     Returns:
         The global AgentPool instance
     """
     global _global_pool
-    
+
     if _global_pool is None:
         logger.info("🏊 [POOL] Creating new global agent pool singleton")
         _global_pool = AgentPool(
@@ -75,24 +75,27 @@ def get_agent_pool(
         )
         logger.info(f"🏊 [POOL] Created pool_id={id(_global_pool)}")
     else:
-        logger.info(f"♻️ [POOL] Reusing existing pool_id={id(_global_pool)}, started={_global_pool._started}, shutdown={_global_pool._shutdown}")
-        # If pool was shutdown (soft shutdown from hot reload), just reset the flag
-        # DON'T create a new pool - existing browser sessions still hold agents from this pool!
+        logger.info(
+            f"♻️ [POOL] Reusing existing pool_id={id(_global_pool)}, started={_global_pool._started}, shutdown={_global_pool._shutdown}"
+        )
+        # If pool was shutdown (soft shutdown from hot reload), reset immediately
+        # This ensures acquire() won't fail while waiting for startup event
         if _global_pool._shutdown:
-            logger.info("⚠️ [POOL] Pool was soft-shutdown, resetting _shutdown flag (agents preserved)")
+            logger.info(
+                "⚠️ [POOL] Pool was soft-shutdown, resetting _shutdown flag immediately (agents preserved)"
+            )
             _global_pool._shutdown = False
-            # Pool will be re-started by start() call
         # Update factory if provided (allows config changes)
         if agent_factory is not None:
             _global_pool.agent_factory = agent_factory
-    
+
     return _global_pool
 
 
 def reset_agent_pool() -> None:
     """
     Reset the global pool (for testing or full restart).
-    
+
     WARNING: This disconnects all agents!
     """
     global _global_pool
@@ -166,15 +169,17 @@ class AgentPool:
         Starts background task to warm up remaining agents.
 
         After this returns, at least one agent is ready for use.
-        
+
         NOTE: This is idempotent and handles hot reload recovery.
         """
         # Handle hot reload: if pool was shutdown but we're being started again,
         # reset the shutdown flag (uvicorn hot reload calls shutdown then start)
         if self._shutdown:
-            logger.info("♻️ [POOL] Resetting shutdown flag (hot reload recovery)")
+            logger.info(
+                "♻️ [POOL] Resetting shutdown flag (hot reload recovery)"
+            )
             self._shutdown = False
-        
+
         if self._started and len(self._agents) > 0:
             # Check if all agents are stuck as in_use (possible hot reload issue)
             in_use_count = sum(1 for a in self._agents if a.in_use)
@@ -194,13 +199,15 @@ class AgentPool:
                 )
             return
 
+        print(f"🏊🏊🏊 [POOL] Starting with {self.size} agents...")
         logger.info(f"🏊 [POOL] Starting with {self.size} agents...")
         start_time = time.time()
 
         # Create and connect first agent (blocking)
+        print("🔶🔶🔶 [POOL] Creating first agent (blocking)...")
         logger.info("🔶 [POOL] Creating first agent (blocking)...")
         first_agent = await self._create_and_connect_agent()
-        
+
         async with self._lock:
             self._agents.append(PooledAgent(agent=first_agent))
 
@@ -213,7 +220,9 @@ class AgentPool:
         # Warm up remaining agents in background
         remaining = self.size - 1
         if remaining > 0:
-            logger.info(f"🔥 [POOL] Warming up {remaining} more agents in background...")
+            logger.info(
+                f"🔥 [POOL] Warming up {remaining} more agents in background..."
+            )
             self._warmup_task = asyncio.create_task(
                 self._warmup_remaining(remaining)
             )
@@ -234,16 +243,18 @@ class AgentPool:
 
         for i in range(count):
             if self._shutdown:
-                logger.info(f"⏹️ [POOL] Warmup cancelled (shutdown)")
+                logger.info("⏹️ [POOL] Warmup cancelled (shutdown)")
                 break
 
             try:
-                logger.debug(f"🔶 [POOL] Warming agent {i + 2}/{self.size}...")
+                logger.debug(
+                    f"🔶 [POOL] Warming agent {i + 2}/{self.size}..."
+                )
                 agent = await self._create_and_connect_agent()
-                
+
                 async with self._lock:
                     self._agents.append(PooledAgent(agent=agent))
-                
+
                 created += 1
                 logger.debug(f"✅ [POOL] Agent {i + 2}/{self.size} ready")
 
@@ -280,26 +291,38 @@ class AgentPool:
             RuntimeError: If pool not started
         """
         # Log state for debugging
-        logger.info(f"🔍 [POOL] acquire() called: started={self._started}, shutdown={self._shutdown}, agents={len(self._agents)}, pool_id={id(self)}")
+        logger.info(
+            f"🔍 [POOL] acquire() called: started={self._started}, shutdown={self._shutdown}, agents={len(self._agents)}, pool_id={id(self)}"
+        )
 
         # Handle race condition during hot reload:
         # If shutdown is in progress, wait briefly for new pool to start
         if self._shutdown or not self._started:
-            logger.warning(f"⏳ [POOL] Pool not ready (started={self._started}, shutdown={self._shutdown}), waiting up to 5s...")
+            logger.warning(
+                f"⏳ [POOL] Pool not ready (started={self._started}, shutdown={self._shutdown}), waiting up to 5s..."
+            )
             for i in range(50):  # Wait up to 5 seconds
                 await asyncio.sleep(0.1)
                 if self._started and not self._shutdown:
                     logger.info("✅ [POOL] Pool is now ready!")
                     break
                 if i % 10 == 0:
-                    logger.info(f"⏳ [POOL] Still waiting... ({i/10}s) started={self._started}, shutdown={self._shutdown}")
-            
+                    logger.info(
+                        f"⏳ [POOL] Still waiting... ({i/10}s) started={self._started}, shutdown={self._shutdown}"
+                    )
+
             # Final check with detailed error
-            logger.info(f"🔍 [POOL] After wait: started={self._started}, shutdown={self._shutdown}")
+            logger.info(
+                f"🔍 [POOL] After wait: started={self._started}, shutdown={self._shutdown}"
+            )
             if self._shutdown:
-                raise RuntimeError(f"Pool is shutting down - pool_id={id(self)}")
+                raise RuntimeError(
+                    f"Pool is shutting down - pool_id={id(self)}"
+                )
             if not self._started:
-                raise RuntimeError(f"Pool not started after 5s wait - pool_id={id(self)}")
+                raise RuntimeError(
+                    f"Pool not started after 5s wait - pool_id={id(self)}"
+                )
 
         timeout = timeout or self.acquire_timeout
         acquire_start = time.time()
@@ -366,7 +389,7 @@ class AgentPool:
             for pooled in self._agents:
                 if pooled.agent is agent:
                     browser_id = pooled.browser_id or "unknown"
-                    
+
                     # Clear agent state
                     agent.message_history.clear()
                     agent.stats.message_count = 0
@@ -378,9 +401,9 @@ class AgentPool:
                     agent._conversation_context = None
 
                     # Clear workspace and question_service references
-                    if hasattr(agent, 'workspace'):
+                    if hasattr(agent, "workspace"):
                         agent.workspace = None
-                    if hasattr(agent, 'question_service'):
+                    if hasattr(agent, "question_service"):
                         agent.question_service = None
 
                     # Mark as available
@@ -395,7 +418,9 @@ class AgentPool:
                     )
                     break
             else:
-                logger.warning("⚠️ [POOL] Agent not found in pool during release")
+                logger.warning(
+                    "⚠️ [POOL] Agent not found in pool during release"
+                )
 
         # Signal that an agent is available
         async with self._available:
@@ -408,7 +433,7 @@ class AgentPool:
         Args:
             force: If True, disconnect all agents. If False (default), just mark
                    as shutdown but keep agents connected (for hot reload).
-        
+
         With hot reload, shutdown() is called but start() will be called again
         shortly after. We keep agents connected to avoid slow reconnection.
         """
@@ -434,14 +459,20 @@ class AgentPool:
                         logger.error(f"Error preparing disconnect: {e}")
 
                 if disconnect_tasks:
-                    await asyncio.gather(*disconnect_tasks, return_exceptions=True)
+                    await asyncio.gather(
+                        *disconnect_tasks, return_exceptions=True
+                    )
 
                 self._agents.clear()
             self._started = False
-            logger.info("✅ [POOL] Full shutdown complete (agents disconnected)")
+            logger.info(
+                "✅ [POOL] Full shutdown complete (agents disconnected)"
+            )
         else:
             # Soft shutdown: keep agents connected for hot reload
-            logger.info(f"✅ [POOL] Soft shutdown complete (keeping {len(self._agents)} agents connected)")
+            logger.info(
+                f"✅ [POOL] Soft shutdown complete (keeping {len(self._agents)} agents connected)"
+            )
 
     def get_stats(self) -> dict:
         """
@@ -455,7 +486,9 @@ class AgentPool:
         available = total - in_use
 
         avg_wait_ms = (
-            sum(self._acquire_wait_times) / len(self._acquire_wait_times) * 1000
+            sum(self._acquire_wait_times)
+            / len(self._acquire_wait_times)
+            * 1000
             if self._acquire_wait_times
             else 0
         )
@@ -478,7 +511,9 @@ class AgentPool:
         """Check if pool has at least one available agent."""
         return self._started and any(not p.in_use for p in self._agents)
 
-    def get_agent_for_browser(self, browser_id: str) -> Optional[BassiAgentSession]:
+    def get_agent_for_browser(
+        self, browser_id: str
+    ) -> Optional[BassiAgentSession]:
         """
         Get the agent currently assigned to a browser.
 
@@ -493,3 +528,34 @@ class AgentPool:
                 return pooled.agent
         return None
 
+    async def set_model_all(self, model_id: str) -> int:
+        """
+        Change the model on all agents in the pool.
+
+        Uses SDK's set_model() which changes model mid-conversation without
+        disconnecting. Much faster than recreating agents.
+
+        Args:
+            model_id: Model ID string (e.g., 'claude-haiku-4-5-20250929')
+
+        Returns:
+            Number of agents updated
+        """
+        updated = 0
+
+        for i, pooled in enumerate(self._agents):
+            try:
+                logger.info(
+                    f"🤖 [POOL] Setting model on agent {i + 1}/{len(self._agents)}: {model_id}"
+                )
+                await pooled.agent.set_model(model_id)
+                updated += 1
+            except Exception as e:
+                logger.error(
+                    f"❌ [POOL] Failed to set model on agent {i + 1}: {e}"
+                )
+
+        logger.info(
+            f"✅ [POOL] Updated model on {updated}/{len(self._agents)} agents"
+        )
+        return updated

@@ -42,6 +42,8 @@ class AgentClient(Protocol):
 
     async def interrupt(self) -> None: ...
 
+    async def set_model(self, model: str | None = None) -> None: ...
+
     async def get_server_info(self) -> Optional[dict[str, Any]]: ...
 
 
@@ -77,11 +79,19 @@ class ClaudeAgentClient:
 
     async def set_permission_mode(self, mode: str) -> None:
         """Change permission mode during conversation.
-        
+
         Args:
             mode: 'default', 'acceptEdits', or 'bypassPermissions'
         """
         await self.sdk_client.set_permission_mode(mode)
+
+    async def set_model(self, model: str | None = None) -> None:
+        """Change the AI model during conversation.
+
+        Args:
+            model: Model ID string (e.g., 'claude-haiku-4-5-20250929')
+        """
+        await self.sdk_client.set_model(model)
 
     async def get_server_info(self) -> Optional[dict[str, Any]]:
         return await self.sdk_client.get_server_info()
@@ -109,13 +119,19 @@ def default_claude_client_factory(config: "SessionConfig") -> AgentClient:
 
 def build_claude_agent_options(config: "SessionConfig"):
     """Construct ``ClaudeAgentOptions`` from ``SessionConfig``."""
+    import logging
 
     from bassi.shared.sdk_loader import ClaudeAgentOptions
+
+    logger = logging.getLogger(__name__)
+
+    model_id = resolve_model_id(config)
+    logger.debug(f"🤖 [SDK] Building agent options: model={model_id}")
 
     # Build options - note: SDK doesn't support 'thinking' parameter
     # Thinking mode would need to be enabled via model suffix if supported
     options = ClaudeAgentOptions(
-        model=resolve_model_id(config),
+        model=model_id,
         allowed_tools=getattr(config, "allowed_tools", None),
         system_prompt=getattr(config, "system_prompt", None),
         permission_mode=getattr(config, "permission_mode", None),
