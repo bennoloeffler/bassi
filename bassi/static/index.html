@@ -161,26 +161,6 @@
     <!-- Input Area -->
     <div class="input-container">
         <div class="input-wrapper">
-            <!-- File Chips Container (ChatGPT/Claude.ai pattern) -->
-            <div id="file-chips-container" class="file-chips-container" style="display: none;">
-                <div class="file-chips-header">
-                    <span class="file-chips-count"></span>
-                    <label class="file-chips-include-toggle" title="Include files in next message">
-                        <input type="checkbox" id="include-files-toggle" checked>
-                        <span>Include in message</span>
-                    </label>
-                    <button class="file-chips-toggle" title="Toggle file display">▼</button>
-                </div>
-                <div id="file-chips-grid" class="file-chips-grid">
-                    <!-- File chips will appear here as small pills -->
-                </div>
-            </div>
-
-            <!-- Session Files List Area (DEPRECATED: files now shown only in chips) -->
-            <div id="file-list-area" class="file-list-area" style="display: none !important;">
-                <!-- This area is deprecated. Session files are now shown in file chips only. -->
-            </div>
-
             <!-- Input Area Components -->
             <div class="input-area">
                 <input type="file" id="file-input" style="display: none;" multiple>
@@ -305,6 +285,59 @@
     </div>
 
     </div><!-- End main-content wrapper -->
+
+    <!-- File Sidebar Controls (right side) -->
+    <div class="file-sidebar-controls">
+        <button id="file-sidebar-toggle" class="file-sidebar-toggle" title="Toggle files">
+            <svg class="file-sidebar-toggle-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="11 18 5 12 11 6"></polyline>
+            </svg>
+        </button>
+    </div>
+
+    <!-- File Sidebar (right side) -->
+    <div id="file-sidebar" class="file-sidebar">
+        <div class="file-sidebar-header">
+            <h3 class="file-sidebar-title">Session Files</h3>
+            <div class="file-sidebar-upload">
+                <button id="file-sidebar-upload-btn" class="file-sidebar-upload-btn" title="Upload files">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    <span>Upload</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="file-sidebar-list" class="file-sidebar-list">
+            <div class="file-sidebar-empty">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.4;">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p>No files uploaded yet</p>
+                <span>Upload files or drag & drop</span>
+            </div>
+            <!-- File items will be added here dynamically:
+            <div class="file-sidebar-item">
+                <span class="file-item-icon">📄</span>
+                <div class="file-item-content">
+                    <div class="file-item-name">example.pdf</div>
+                    <div class="file-item-meta">PDF • 2.4 MB</div>
+                </div>
+                <button class="file-item-delete" title="Remove file">×</button>
+            </div>
+            -->
+        </div>
+
+        <div class="file-sidebar-footer">
+            <div class="file-sidebar-stats">
+                <span id="file-sidebar-count">0 files</span>
+                <span id="file-sidebar-size">0 B used</span>
+            </div>
+        </div>
+    </div>
 
     <!-- Load our client script -->
     <script src="/static/app.js"></script>

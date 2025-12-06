@@ -34,19 +34,21 @@ class BassiWebClient {
         this.sessionCapabilities = null      // Capabilities from init system message
         this.sessionId = null                // Current session ID from WebSocket connection
 
-        // Autocomplete state
+        // Autocomplete state (supports both /commands and @files)
         this.commandRegistry = []            // All available commands
         this.autocompletePanel = null        // Autocomplete panel DOM element
         this.autocompleteVisible = false     // Is panel visible
-        this.autocompleteSelectedIndex = -1  // Currently selected command index
-        this.autocompleteCommands = []       // Filtered commands for current input
+        this.autocompleteSelectedIndex = -1  // Currently selected item index
+        this.autocompleteItems = []          // Filtered items for current input
+        this.autocompleteMode = null         // 'command' | 'file' | null
+        this.autocompleteCommands = []       // Filtered commands (for backward compat)
+        this.fileAtPosition = -1             // Position of @ in input when showing file autocomplete
 
         // Streaming markdown renderer
         this.markdownRenderer = null
         this.renderDebounceTimers = new Map()  // id -> timer
 
-        // File handling
-        this.stagedFiles = []                    // Files uploaded to server (shown as chips)
+        // File handling (using file sidebar, not chips)
         this.pendingFiles = []                   // Files waiting for session ID
         this.sessionFiles = []                   // All files in current session (from API)
         this.dragCounter = 0                     // Track drag enter/leave events
@@ -65,19 +67,7 @@ class BassiWebClient {
         this.fileInput = document.getElementById('file-input')
         this.uploadButton = document.getElementById('upload-button')
 
-        // File chips elements (ChatGPT/Claude.ai pattern)
-        this.fileChipsContainer = document.getElementById('file-chips-container')
-        this.fileChipsGrid = document.getElementById('file-chips-grid')
-        this.fileChipsCount = document.querySelector('.file-chips-count')
-        this.fileChipsToggle = document.querySelector('.file-chips-toggle')
-        this.includeFilesToggle = document.getElementById('include-files-toggle')
-
-        // File list area elements
-        this.fileListArea = document.getElementById('file-list-area')
-        this.fileListCount = document.querySelector('.file-list-count')
-        this.fileListContent = document.getElementById('file-list-content')
-        this.fileListToggleIcon = document.querySelector('.file-list-toggle-icon')
-        this.fileListExpanded = false
+        // File elements (removed old file chips - now using file sidebar)
 
         // Session sidebar elements
         this.sessionSidebar = document.getElementById('session-sidebar')
@@ -89,6 +79,16 @@ class BassiWebClient {
         this.sessionSidebarOpen = false
         this.allSessions = []  // All sessions from API
         this.filteredSessions = []  // Sessions after search filter
+
+        // File sidebar elements
+        this.fileSidebar = document.getElementById('file-sidebar')
+        this.fileSidebarToggle = document.getElementById('file-sidebar-toggle')
+        this.fileSidebarControls = this.fileSidebarToggle?.parentElement
+        this.fileSidebarList = document.getElementById('file-sidebar-list')
+        this.fileSidebarUploadBtn = document.getElementById('file-sidebar-upload-btn')
+        this.fileSidebarCount = document.getElementById('file-sidebar-count')
+        this.fileSidebarSize = document.getElementById('file-sidebar-size')
+        this.fileSidebarOpen = false
 
         // Connection count indicator
         this.connectionCountEl = document.getElementById('connection-count-value')
@@ -183,6 +183,9 @@ class BassiWebClient {
         // Initialize session sidebar
         this.initSessionSidebar()
 
+        // Initialize file sidebar
+        this.initFileSidebar()
+
         // PHASE 1: Eager capability loading - load in parallel on startup
         this.loadCapabilities().then(() => {
             console.log('✅ Capabilities loaded on startup')
@@ -259,57 +262,11 @@ class BassiWebClient {
 
             console.log('📁 Session files loaded:', this.sessionFiles.length)
 
-            // Update file chips with session files
-            this.updateFileChipsFromSessionFiles()
+            // Update file sidebar (files are shown in sidebar, not chips)
+            this.renderFileSidebar()
         } catch (error) {
             console.error('❌ Error loading session files:', error)
         }
-    }
-
-    updateFileChipsFromSessionFiles() {
-        /**
-         * Update file chips display to show session files.
-         * Merges session files with currently staged files.
-         */
-        if (!this.sessionFiles || this.sessionFiles.length === 0) {
-            return
-        }
-
-        // Convert session files to staged files format
-        const sessionStagedFiles = this.sessionFiles.map(file => {
-            // Backend returns path like "DATA_FROM_USER/test_document_88fd1df3fb2ec431.txt"
-            // Extract just the filename
-            const filename = file.path.split('/').pop()
-            const fileType = this.getFileType({ name: filename, type: this.getMimeType(filename) })
-
-            return {
-                id: `session_${file.path.replace(/[^a-z0-9]/gi, '_')}`,
-                filename: filename,
-                size: file.size,
-                type: fileType,
-                saved_path: file.path,
-                media_type: this.getMimeType(filename),
-                data: null,  // Will be loaded for images
-                isSessionFile: true
-            }
-        })
-
-        // Merge with currently staged files (avoid duplicates by name)
-        const existingNames = new Set(this.stagedFiles.map(f => f.filename))
-        for (const sessionFile of sessionStagedFiles) {
-            if (!existingNames.has(sessionFile.filename)) {
-                this.stagedFiles.push(sessionFile)
-
-                // Load image data for preview if it's an image
-                if (sessionFile.type === 'image') {
-                    this.loadImagePreview(sessionFile)
-                }
-            }
-        }
-
-        // Update UI
-        this.renderFileChips()
-        this.renderFileList()
     }
 
     getMimeType(filename) {
@@ -338,63 +295,6 @@ class BassiWebClient {
             'csv': 'text/csv'
         }
         return mimeTypes[ext] || 'application/octet-stream'
-    }
-
-    async loadImagePreview(fileData) {
-        /**
-         * Load image data from server for preview.
-         */
-        if (!this.sessionId || !fileData.saved_path) return
-
-        try {
-            // Fetch image from server
-            const response = await fetch(`/api/sessions/${this.sessionId}/file/${encodeURIComponent(fileData.saved_path)}`)
-            if (!response.ok) return
-
-            const blob = await response.blob()
-            const reader = new FileReader()
-
-            reader.onload = () => {
-                const dataUrl = reader.result
-                const [header, base64Data] = dataUrl.split(',')
-                fileData.data = base64Data
-                fileData.media_type = header.match(/:(.*?);/)?.[1] || fileData.media_type
-
-                // Re-render to show the image
-                this.renderFileChips()
-            }
-
-            reader.readAsDataURL(blob)
-        } catch (error) {
-            console.warn('Failed to load image preview:', fileData.filename, error)
-        }
-    }
-
-    toggleFileList() {
-        /**
-         * Toggle file list area between expanded and collapsed.
-         */
-        this.fileListExpanded = !this.fileListExpanded
-
-        if (this.fileListExpanded) {
-            this.fileListContent.style.display = 'block'
-            this.fileListToggleIcon.textContent = '▲'
-        } else {
-            this.fileListContent.style.display = 'none'
-            this.fileListToggleIcon.textContent = '▼'
-        }
-    }
-
-    renderFileList() {
-        /**
-         * Update session file state.
-         * NOTE: The separate session files list was removed to avoid duplication.
-         * Session files are now shown only in the file chips area.
-         */
-        // Hide the legacy file list area (files are shown in chips only)
-        if (this.fileListArea) {
-            this.fileListArea.style.display = 'none'
-        }
     }
 
     formatFileSize(bytes) {
@@ -506,6 +406,16 @@ class BassiWebClient {
         // Handle thinking toggle
         if (thinkingToggle) {
             thinkingToggle.addEventListener('change', (e) => {
+                // Guard: Block thinking toggle during agent work
+                // Reason: Changing thinking mode disconnects and reconnects the session
+                if (this.isAgentWorking) {
+                    console.log('⚠️ Blocking thinking toggle - agent is working')
+                    this.showNotification('Cannot change thinking mode while Claude is working', 'warning')
+                    // Revert toggle to previous state
+                    e.target.checked = !e.target.checked
+                    return
+                }
+
                 const showThinking = e.target.checked
 
                 // Save preference to localStorage
@@ -931,12 +841,12 @@ class BassiWebClient {
         // PHASE 4: Rebuild command registry when capabilities change
         this.buildCommandRegistry()
 
-        // If autocomplete is visible, refresh it
-        if (this.autocompleteVisible) {
+        // If autocomplete is visible and in command mode, refresh it
+        if (this.autocompleteVisible && this.autocompleteMode === 'command') {
             const currentQuery = this.messageInput.value.startsWith('/')
                 ? this.messageInput.value.substring(1).toLowerCase()
                 : ''
-            this.showAutocomplete(currentQuery)
+            this.showCommandAutocomplete(currentQuery)
         }
 
         console.log('🔄 Command registry rebuilt:', this.commandRegistry.length, 'commands')
@@ -944,24 +854,46 @@ class BassiWebClient {
 
     handleAutocompleteInput(e) {
         const value = this.messageInput.value
+        const cursorPos = this.messageInput.selectionStart
 
-        // Show autocomplete when "/" is typed at the start
+        // === Command autocomplete (/ at start) ===
         if (value === '/') {
-            this.showAutocomplete('')
+            this.showCommandAutocomplete('')
+            return
         }
-        // Filter autocomplete if it's visible and starts with "/"
-        else if (value.startsWith('/') && !value.includes(' ')) {
+        if (value.startsWith('/') && !value.includes(' ')) {
             const query = value.substring(1).toLowerCase()
-            this.showAutocomplete(query)
+            this.showCommandAutocomplete(query)
+            return
         }
-        // Hide if user deleted the "/" or added a space
-        else if (this.autocompleteVisible) {
+
+        // === File autocomplete (@ anywhere) ===
+        // Find the @ closest to cursor
+        const beforeCursor = value.substring(0, cursorPos)
+        const lastAtPos = beforeCursor.lastIndexOf('@')
+
+        if (lastAtPos >= 0) {
+            // Check if @ is valid (start of word: beginning or after space)
+            const charBefore = lastAtPos > 0 ? beforeCursor[lastAtPos - 1] : ' '
+            if (charBefore === ' ' || charBefore === '\n' || lastAtPos === 0) {
+                // Get query after @ (until cursor)
+                const query = beforeCursor.substring(lastAtPos + 1)
+                // Only show if no space in query (still typing the ref)
+                if (!query.includes(' ')) {
+                    this.showFileAutocomplete(query, lastAtPos)
+                    return
+                }
+            }
+        }
+
+        // Hide autocomplete if conditions aren't met
+        if (this.autocompleteVisible) {
             this.hideAutocomplete()
         }
     }
 
     handleAutocompleteKeydown(e) {
-        if (!this.autocompleteVisible || this.autocompleteCommands.length === 0) {
+        if (!this.autocompleteVisible || this.autocompleteItems.length === 0) {
             return
         }
 
@@ -969,7 +901,7 @@ class BassiWebClient {
             case 'ArrowDown':
                 e.preventDefault()
                 this.autocompleteSelectedIndex =
-                    (this.autocompleteSelectedIndex + 1) % this.autocompleteCommands.length
+                    (this.autocompleteSelectedIndex + 1) % this.autocompleteItems.length
                 this.renderAutocomplete()
                 break
 
@@ -977,7 +909,7 @@ class BassiWebClient {
                 e.preventDefault()
                 this.autocompleteSelectedIndex =
                     this.autocompleteSelectedIndex <= 0
-                        ? this.autocompleteCommands.length - 1
+                        ? this.autocompleteItems.length - 1
                         : this.autocompleteSelectedIndex - 1
                 this.renderAutocomplete()
                 break
@@ -985,21 +917,17 @@ class BassiWebClient {
             case 'Enter':
                 if (this.autocompleteSelectedIndex >= 0) {
                     e.preventDefault()
-                    const selected = this.autocompleteCommands[this.autocompleteSelectedIndex]
-                    this.selectCommand(selected.name)
+                    this.selectAutocompleteItem(this.autocompleteSelectedIndex)
                 }
                 break
 
             case 'Tab':
                 e.preventDefault()
                 if (this.autocompleteSelectedIndex >= 0) {
-                    const selected = this.autocompleteCommands[this.autocompleteSelectedIndex]
-                    this.messageInput.value = selected.name
-                    this.hideAutocomplete()
-                } else if (this.autocompleteCommands.length > 0) {
+                    this.selectAutocompleteItem(this.autocompleteSelectedIndex)
+                } else if (this.autocompleteItems.length > 0) {
                     // Tab with no selection: complete to first match
-                    this.messageInput.value = this.autocompleteCommands[0].name
-                    this.hideAutocomplete()
+                    this.selectAutocompleteItem(0)
                 }
                 break
 
@@ -1010,7 +938,34 @@ class BassiWebClient {
         }
     }
 
-    showAutocomplete(query) {
+    selectAutocompleteItem(index) {
+        const item = this.autocompleteItems[index]
+        if (this.autocompleteMode === 'command') {
+            this.selectCommand(item.name)
+        } else if (this.autocompleteMode === 'file') {
+            this.selectFile(item)
+        }
+    }
+
+    selectFile(file) {
+        // Insert @ref at the @ position, replacing what was typed
+        const value = this.messageInput.value
+        const beforeAt = value.substring(0, this.fileAtPosition)
+        const afterCursor = value.substring(this.messageInput.selectionStart)
+
+        // Build the new value with @ref
+        const ref = `@${file.ref}`
+        this.messageInput.value = beforeAt + ref + ' ' + afterCursor.trimStart()
+
+        // Position cursor after the inserted ref
+        const newCursorPos = beforeAt.length + ref.length + 1
+        this.messageInput.setSelectionRange(newCursorPos, newCursorPos)
+
+        this.hideAutocomplete()
+        this.messageInput.focus()
+    }
+
+    showCommandAutocomplete(query) {
         // Rebuild registry if capabilities have loaded
         if (this.sessionCapabilities && this.commandRegistry.length === 6) {
             this.buildCommandRegistry()
@@ -1018,8 +973,10 @@ class BassiWebClient {
 
         // Filter commands
         this.autocompleteCommands = this.filterCommands(query)
+        this.autocompleteItems = this.autocompleteCommands
+        this.autocompleteMode = 'command'
 
-        if (this.autocompleteCommands.length === 0) {
+        if (this.autocompleteItems.length === 0) {
             this.hideAutocomplete()
             return
         }
@@ -1028,10 +985,7 @@ class BassiWebClient {
         this.autocompleteSelectedIndex = -1
 
         // Position panel above input
-        const inputRect = this.messageInput.getBoundingClientRect()
-        this.autocompletePanel.style.left = inputRect.left + 'px'
-        this.autocompletePanel.style.bottom = (window.innerHeight - inputRect.top + 10) + 'px'
-        this.autocompletePanel.style.width = inputRect.width + 'px'
+        this.positionAutocompletePanel()
 
         // Render and show
         this.renderAutocomplete()
@@ -1039,11 +993,46 @@ class BassiWebClient {
         this.autocompleteVisible = true
     }
 
+    showFileAutocomplete(query, atPosition) {
+        // Store @ position for insertion
+        this.fileAtPosition = atPosition
+
+        // Filter files from current session
+        this.autocompleteItems = this.filterFiles(query)
+        this.autocompleteMode = 'file'
+
+        if (this.autocompleteItems.length === 0) {
+            this.hideAutocomplete()
+            return
+        }
+
+        // Reset selection
+        this.autocompleteSelectedIndex = -1
+
+        // Position panel above input
+        this.positionAutocompletePanel()
+
+        // Render and show
+        this.renderAutocomplete()
+        this.autocompletePanel.classList.remove('hidden')
+        this.autocompleteVisible = true
+    }
+
+    positionAutocompletePanel() {
+        const inputRect = this.messageInput.getBoundingClientRect()
+        this.autocompletePanel.style.left = inputRect.left + 'px'
+        this.autocompletePanel.style.bottom = (window.innerHeight - inputRect.top + 10) + 'px'
+        this.autocompletePanel.style.width = inputRect.width + 'px'
+    }
+
     hideAutocomplete() {
         this.autocompletePanel.classList.add('hidden')
         this.autocompleteVisible = false
         this.autocompleteSelectedIndex = -1
         this.autocompleteCommands = []
+        this.autocompleteItems = []
+        this.autocompleteMode = null
+        this.fileAtPosition = -1
     }
 
     filterCommands(query) {
@@ -1068,29 +1057,68 @@ class BassiWebClient {
         })
     }
 
-    renderAutocomplete() {
-        const html = this.autocompleteCommands.map((cmd, index) => {
-            const isSelected = index === this.autocompleteSelectedIndex
-            const icon = cmd.type === 'builtin' ? '🔧' : '💻'
+    filterFiles(query) {
+        // Return files from sessionFiles that match query
+        if (!this.sessionFiles || this.sessionFiles.length === 0) {
+            return []
+        }
 
-            return `
-                <div class="autocomplete-item ${isSelected ? 'selected' : ''}"
-                     data-index="${index}">
-                    <span class="autocomplete-icon">${icon}</span>
-                    <div class="autocomplete-content">
-                        <div class="autocomplete-name">${this.escapeHtml(cmd.name)}</div>
-                        ${cmd.description ? `<div class="autocomplete-desc">${this.escapeHtml(cmd.description)}</div>` : ''}
+        if (!query) {
+            return this.sessionFiles
+        }
+
+        const lowerQuery = query.toLowerCase()
+
+        // Filter by ref name (without @)
+        return this.sessionFiles.filter(file => {
+            const ref = (file.ref || '').toLowerCase()
+            return ref.startsWith(lowerQuery) || ref.includes(lowerQuery)
+        })
+    }
+
+    renderAutocomplete() {
+        let html = ''
+
+        if (this.autocompleteMode === 'command') {
+            html = this.autocompleteItems.map((cmd, index) => {
+                const isSelected = index === this.autocompleteSelectedIndex
+                const icon = cmd.type === 'builtin' ? '🔧' : '💻'
+
+                return `
+                    <div class="autocomplete-item ${isSelected ? 'selected' : ''}"
+                         data-index="${index}">
+                        <span class="autocomplete-icon">${icon}</span>
+                        <div class="autocomplete-content">
+                            <div class="autocomplete-name">${this.escapeHtml(cmd.name)}</div>
+                            ${cmd.description ? `<div class="autocomplete-desc">${this.escapeHtml(cmd.description)}</div>` : ''}
+                        </div>
                     </div>
-                </div>
-            `
-        }).join('')
+                `
+            }).join('')
+        } else if (this.autocompleteMode === 'file') {
+            html = this.autocompleteItems.map((file, index) => {
+                const isSelected = index === this.autocompleteSelectedIndex
+                const icon = this.getFileIcon(file.file_type || file.type)
+
+                return `
+                    <div class="autocomplete-item ${isSelected ? 'selected' : ''}"
+                         data-index="${index}">
+                        <span class="autocomplete-icon">${icon}</span>
+                        <div class="autocomplete-content">
+                            <div class="autocomplete-name">@${this.escapeHtml(file.ref)}</div>
+                            <div class="autocomplete-desc">${this.escapeHtml(file.size_human || this.formatFileSize(file.size))}</div>
+                        </div>
+                    </div>
+                `
+            }).join('')
+        }
 
         this.autocompletePanel.innerHTML = html
 
         // Add click handlers
         this.autocompletePanel.querySelectorAll('.autocomplete-item').forEach((item, index) => {
             item.addEventListener('click', () => {
-                this.selectCommand(this.autocompleteCommands[index].name)
+                this.selectAutocompleteItem(index)
             })
         })
 
@@ -1101,6 +1129,102 @@ class BassiWebClient {
                 selected.scrollIntoView({ block: 'nearest' })
             }
         }
+    }
+
+    getFileIcon(fileType) {
+        const icons = {
+            'image': '🖼️',
+            'document': '📄',
+            'pdf': '📑',
+            'spreadsheet': '📊',
+            'text': '📝',
+            'code': '💻',
+            'archive': '📦',
+            'audio': '🎵',
+            'video': '🎬'
+        }
+        return icons[fileType] || '📎'
+    }
+
+    formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B'
+        const units = ['B', 'KB', 'MB', 'GB']
+        const i = Math.floor(Math.log(bytes) / Math.log(1024))
+        return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
+    }
+
+    // ========== @Reference Parsing ==========
+
+    extractFileReferences(text) {
+        // Extract @filename references from text
+        // Matches @word where word contains alphanumeric, underscore, dot, hyphen
+        const pattern = /@([\w.\-]+)/g
+        const matches = []
+        let match
+
+        while ((match = pattern.exec(text)) !== null) {
+            matches.push({
+                ref: match[1],
+                fullMatch: match[0],
+                index: match.index
+            })
+        }
+
+        return matches
+    }
+
+    validateFileReferences(text) {
+        // Extract @references and check if they exist in session files
+        const refs = this.extractFileReferences(text)
+        const validRefs = []
+        const invalidRefs = []
+
+        for (const ref of refs) {
+            const file = this.sessionFiles.find(f => f.ref === ref.ref)
+            if (file) {
+                validRefs.push({ ...ref, file })
+            } else {
+                invalidRefs.push(ref)
+            }
+        }
+
+        return { validRefs, invalidRefs }
+    }
+
+    highlightFileReferences(text) {
+        // Return text with @references wrapped in spans for styling
+        // Used for display in chat messages
+        if (!this.sessionFiles || this.sessionFiles.length === 0) {
+            return this.escapeHtml(text)
+        }
+
+        let result = this.escapeHtml(text)
+        const refs = this.extractFileReferences(text)
+
+        // Sort by index descending to replace from end (avoids index shifting)
+        refs.sort((a, b) => b.index - a.index)
+
+        for (const ref of refs) {
+            const file = this.sessionFiles.find(f => f.ref === ref.ref)
+            const escapedRef = this.escapeHtml(ref.fullMatch)
+            const escapedRefEscaped = escapedRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+            if (file) {
+                // Valid reference - highlight in green
+                result = result.replace(
+                    new RegExp(escapedRefEscaped),
+                    `<span class="file-ref valid" title="${this.escapeHtml(file.path || file.ref)}">${escapedRef}</span>`
+                )
+            } else {
+                // Invalid reference - highlight in red
+                result = result.replace(
+                    new RegExp(escapedRefEscaped),
+                    `<span class="file-ref invalid" title="File not found">${escapedRef}</span>`
+                )
+            }
+        }
+
+        return result
     }
 
     selectCommand(commandName) {
@@ -1294,37 +1418,33 @@ class BassiWebClient {
         }
 
 
-        // Add files from staging area (file chips) - only if toggle is checked
-        if (this.includeFilesToggle && this.includeFilesToggle.checked) {
-            for (const file of this.stagedFiles) {
-                if (file.type === 'image' && file.data) {
-                    // Image with base64 data
-                    contentBlocks.push({
-                        type: 'image',
-                        source: {
-                            type: 'base64',
-                            media_type: file.media_type,
-                            data: file.data
-                        }
-                    })
-                } else if (file.type === 'pdf' && file.data) {
-                    // PDF as document block with base64 data
-                    contentBlocks.push({
-                        type: 'document',
-                        source: {
-                            type: 'base64',
-                            media_type: 'application/pdf',
-                            data: file.data
-                        }
-                    })
-                } else {
-                    // Other files as text reference (Claude will use Read tool)
-                    contentBlocks.push({
-                        type: 'text',
-                        text: `[Attached file: ${file.filename} (${this.formatFileSize(file.size)}) - saved to ${file.saved_path}]`
-                    })
-                }
+        // Process @references in message - add images/PDFs as content blocks
+        // Text files are handled via system context (Claude uses Read tool)
+        const { validRefs } = this.validateFileReferences(content)
+        for (const ref of validRefs) {
+            const file = ref.file
+            if (file.file_type === 'image' && file.data) {
+                // Image with base64 data
+                contentBlocks.push({
+                    type: 'image',
+                    source: {
+                        type: 'base64',
+                        media_type: file.mime_type || 'image/png',
+                        data: file.data
+                    }
+                })
+            } else if (file.file_type === 'pdf' && file.data) {
+                // PDF as document block with base64 data
+                contentBlocks.push({
+                    type: 'document',
+                    source: {
+                        type: 'base64',
+                        media_type: 'application/pdf',
+                        data: file.data
+                    }
+                })
             }
+            // Text files: Claude uses Read tool via path in system context
         }
 
         // Must have at least text, image, or file
@@ -1347,9 +1467,9 @@ class BassiWebClient {
             this.blocks.clear()
             this.textBuffers.clear()
         } else {
-            // Display user message with files (only if toggle is checked)
-            const displayFiles = (this.includeFilesToggle && this.includeFilesToggle.checked) ? this.stagedFiles : []
-            this.addUserMessageWithImages(content, [], displayFiles)
+            // Display user message with @referenced files
+            const referencedFiles = validRefs.map(r => r.file)
+            this.addUserMessageWithImages(content, [], referencedFiles)
             // Reset currentMessage for new conversation
             this.currentMessage = null
             this.blocks.clear()
@@ -1364,15 +1484,13 @@ class BassiWebClient {
 
         console.log(`📤 Sent ${messageType}:`, contentBlocks.length === 1 ? 'text-only' : `${contentBlocks.length} blocks`)
 
-        // Close session sidebar when starting chat
+        // Close sidebars when starting chat
         this.closeSessionSidebar()
+        this.closeFileSidebar()
 
-        // Clear input and reset height (but keep files attached)
+        // Clear input and reset height
         this.messageInput.value = ''
         this.messageInput.style.height = 'auto'
-        // Keep stagedFiles - they persist across messages until user removes them
-        // this.stagedFiles = []  // Don't clear - files stay attached
-        this.renderFileChips()  // Re-render chips to show they're still attached
 
         // If this was a regular message, set agent working
         if (messageType === 'user_message') {
@@ -1776,178 +1894,6 @@ class BassiWebClient {
         return '📄'
     }
 
-    renderFileChips() {
-        /**
-         * Render file chips inside input wrapper (ChatGPT/Claude.ai pattern).
-         * Files are uploaded immediately to server, chips show what will be sent to Claude.
-         */
-        if (!this.fileChipsContainer || !this.fileChipsGrid) {
-            console.warn('⚠️ File chips elements not found')
-            return
-        }
-
-        // Clear existing chips
-        this.fileChipsGrid.innerHTML = ''
-
-        // Hide if no files
-        if (this.stagedFiles.length === 0) {
-            this.fileChipsContainer.style.display = 'none'
-            this.fileChipsContainer.classList.remove('has-files')
-            return
-        }
-
-        // Show chips container
-        this.fileChipsContainer.style.display = 'block'
-        this.fileChipsContainer.classList.add('has-files')
-
-        // Update file count with session info
-        if (this.fileChipsCount) {
-            const totalFiles = this.stagedFiles.length
-            const sessionFileCount = this.stagedFiles.filter(f => f.isSessionFile).length
-            const newFileCount = totalFiles - sessionFileCount
-
-            let countText
-            if (sessionFileCount > 0 && newFileCount > 0) {
-                countText = `📎 ${totalFiles} files (${newFileCount} new, ${sessionFileCount} in session)`
-            } else if (sessionFileCount > 0) {
-                const fileText = sessionFileCount === 1 ? 'file' : 'files'
-                countText = `📁 ${sessionFileCount} ${fileText} in session`
-            } else {
-                const fileText = totalFiles === 1 ? 'file' : 'files'
-                countText = `📎 ${totalFiles} ${fileText}`
-            }
-            this.fileChipsCount.textContent = countText
-        }
-
-        // Setup toggle functionality
-        if (this.fileChipsToggle && !this.fileChipsToggle.hasListener) {
-            this.fileChipsToggle.hasListener = true
-            const header = this.fileChipsContainer.querySelector('.file-chips-header')
-            if (header) {
-                header.onclick = () => {
-                    this.fileChipsGrid.classList.toggle('collapsed')
-                    this.fileChipsToggle.classList.toggle('collapsed')
-                }
-            }
-        }
-
-        // Render each file as a small chip
-        this.stagedFiles.forEach((file, index) => {
-            const chip = document.createElement('div')
-            chip.className = 'file-chip'
-            chip.dataset.fileId = file.id
-
-            // For images: show thumbnail
-            if (file.type === 'image' && file.data) {
-                const thumbnail = document.createElement('img')
-                thumbnail.className = 'file-chip-thumbnail'
-                thumbnail.src = `data:${file.media_type};base64,${file.data}`
-                thumbnail.alt = file.filename
-                chip.appendChild(thumbnail)
-
-                // File name below thumbnail
-                const name = document.createElement('span')
-                name.className = 'file-chip-name'
-                name.textContent = file.filename
-                chip.appendChild(name)
-
-                // File size below name
-                const size = document.createElement('span')
-                size.className = 'file-chip-size'
-                size.textContent = this.formatFileSize(file.size)
-                chip.appendChild(size)
-            } else {
-                // For non-images: show icon + name
-                const icon = document.createElement('span')
-                icon.className = 'file-chip-icon'
-                icon.textContent = this.getFileIcon(file.filename)
-                chip.appendChild(icon)
-
-                // File name (truncated)
-                const name = document.createElement('span')
-                name.className = 'file-chip-name'
-                name.textContent = file.filename
-                chip.appendChild(name)
-
-                // File size
-                const size = document.createElement('span')
-                size.className = 'file-chip-size'
-                size.textContent = `(${this.formatFileSize(file.size)})`
-                chip.appendChild(size)
-            }
-
-            // Remove button (for both types)
-            const removeBtn = document.createElement('span')
-            removeBtn.className = 'file-chip-remove'
-            removeBtn.textContent = '×'
-            removeBtn.title = 'Remove file'
-            removeBtn.onclick = (e) => {
-                e.stopPropagation()
-                this.removeFromStaging(file.id)
-            }
-            chip.appendChild(removeBtn)
-
-            // Add hover preview tooltip
-            chip.addEventListener('mouseenter', () => {
-                this.showPreviewTooltip(file, chip)
-            })
-            chip.addEventListener('mouseleave', () => {
-                this.hidePreviewTooltip()
-            })
-
-            this.fileChipsGrid.appendChild(chip)
-        })
-
-        console.log(`📎 File chips updated: ${this.stagedFiles.length} file(s) attached`)
-    }
-
-    removeFromStaging(fileId) {
-        /**
-         * Remove a file from the attached files.
-         */
-        const index = this.stagedFiles.findIndex(f => f.id === fileId)
-        if (index !== -1) {
-            const file = this.stagedFiles[index]
-            this.stagedFiles.splice(index, 1)
-            console.log(`🗑️ Removed file: ${file.filename}`)
-            this.renderFileChips()
-        }
-    }
-
-    async addFileToStaging(file, uploadResult) {
-        /**
-         * Add a file to attached files after successful upload.
-         * File is already uploaded to server, chip shows it will be sent to Claude.
-         */
-        const fileType = this.getFileType(file)
-
-        const fileData = {
-            id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            filename: file.name,
-            size: file.size,
-            type: fileType,
-            saved_path: uploadResult.path,
-            media_type: file.type,
-            data: null  // Will be set for images and PDFs (base64)
-        }
-
-        // For images and PDFs, encode as base64 for sending to Claude
-        if (fileType === 'image' || fileType === 'pdf') {
-            try {
-                const dataUrl = await this.fileToDataUrl(file)
-                const [header, base64Data] = dataUrl.split(',')
-                fileData.data = base64Data
-                fileData.media_type = header.match(/:(.*?);/)[1]
-            } catch (error) {
-                console.warn('Failed to encode file as base64:', error)
-            }
-        }
-
-        this.stagedFiles.push(fileData)
-        console.log(`📎 File attached: ${file.name} (uploaded to server)`)
-        this.renderFileChips()
-    }
-
     fileToDataUrl(file) {
         /**
          * Convert a File object to a data URL for preview.
@@ -2058,7 +2004,7 @@ class BassiWebClient {
                 <span class="user-icon">👤</span>
                 <span class="user-name">You</span>
             </div>
-            <div class="message-content">${this.escapeHtml(content)}</div>
+            <div class="message-content">${this.highlightFileReferences(content)}</div>
         `
         this.conversationEl.appendChild(messageEl)
 
@@ -2083,9 +2029,9 @@ class BassiWebClient {
             </div>
         `
 
-        // Add text content if present
+        // Add text content if present (with @reference highlighting)
         if (content) {
-            messageHtml += `<div class="message-content">${this.escapeHtml(content)}</div>`
+            messageHtml += `<div class="message-content">${this.highlightFileReferences(content)}</div>`
         }
 
         // Add images if present
@@ -2123,7 +2069,7 @@ class BassiWebClient {
                 <span class="hint-icon">💡</span>
                 <span class="hint-label">HINT</span>
             </div>
-            <div class="message-content">${this.escapeHtml(content)}</div>
+            <div class="message-content">${this.highlightFileReferences(content)}</div>
         `
         this.conversationEl.appendChild(hintMsg)
 
@@ -4497,8 +4443,8 @@ class BassiWebClient {
         this.blocks.clear()
         this.textBuffers.clear()
         this.sessionFiles = []
-        this.stagedFiles = []
         this.messageInput.value = ''  // Clear input field
+        this.renderFileSidebar()  // Update file sidebar to show empty state
 
         // Set new session ID BEFORE connecting
         this.sessionId = sessionId
@@ -4690,6 +4636,278 @@ class BassiWebClient {
         }
     }
 
+    // ========== File Sidebar Management ==========
+
+    initFileSidebar() {
+        /**
+         * Initialize file sidebar event listeners.
+         */
+        if (!this.fileSidebarToggle || !this.fileSidebar) {
+            console.warn('⚠️ File sidebar elements not found')
+            return
+        }
+
+        // Toggle button click
+        this.fileSidebarToggle.addEventListener('click', () => {
+            this.toggleFileSidebar()
+        })
+
+        // Upload button click (in sidebar)
+        if (this.fileSidebarUploadBtn) {
+            this.fileSidebarUploadBtn.addEventListener('click', () => {
+                // Trigger the file input click
+                this.fileInput?.click()
+            })
+        }
+
+        // Close sidebar when clicking outside on mobile
+        document.addEventListener('click', (e) => {
+            if (this.fileSidebarOpen &&
+                window.innerWidth <= 768 &&
+                !this.fileSidebar.contains(e.target) &&
+                !this.fileSidebarToggle.contains(e.target)) {
+                this.closeFileSidebar()
+            }
+        })
+
+        // Initial render (empty state)
+        this.renderFileSidebar()
+
+        console.log('✅ File sidebar initialized')
+    }
+
+    toggleFileSidebar() {
+        /**
+         * Toggle file sidebar open/close state.
+         */
+        this.fileSidebarOpen = !this.fileSidebarOpen
+        this.updateFileSidebarState()
+    }
+
+    closeFileSidebar() {
+        /**
+         * Close file sidebar if open.
+         */
+        if (this.fileSidebarOpen) {
+            this.fileSidebarOpen = false
+            this.updateFileSidebarState()
+        }
+    }
+
+    updateFileSidebarState() {
+        /**
+         * Update file sidebar UI based on open/close state.
+         */
+        if (this.fileSidebarOpen) {
+            this.fileSidebar.classList.add('open')
+            this.fileSidebarControls?.classList.add('open')
+            document.body.classList.add('file-sidebar-open')
+        } else {
+            this.fileSidebar.classList.remove('open')
+            this.fileSidebarControls?.classList.remove('open')
+            document.body.classList.remove('file-sidebar-open')
+        }
+    }
+
+    renderFileSidebar() {
+        /**
+         * Render files in the file sidebar from sessionFiles array.
+         */
+        if (!this.fileSidebarList) return
+
+        // Show empty state if no files
+        if (!this.sessionFiles || this.sessionFiles.length === 0) {
+            this.fileSidebarList.innerHTML = `
+                <div class="file-sidebar-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.4;">
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <p>No files uploaded yet</p>
+                    <span>Upload files or drag & drop</span>
+                </div>
+            `
+            this.updateFileSidebarStats()
+            return
+        }
+
+        // Render file items
+        const fileItems = this.sessionFiles.map(file => {
+            const fileSize = this.formatFileSize(file.size || 0)
+            const isImage = file.file_type === 'image'
+            const isPdf = file.file_type === 'pdf'
+
+            // Show thumbnail for images, icon for others
+            let iconContent
+            if (isImage && file.data) {
+                const mimeType = file.mime_type || 'image/png'
+                iconContent = `<img class="file-sidebar-item-thumbnail" src="data:${mimeType};base64,${file.data}" alt="${file.ref}">`
+            } else {
+                const fileIcon = this.getFileIcon(file.file_type || 'unknown')
+                iconContent = `<span class="file-sidebar-item-emoji">${fileIcon}</span>`
+            }
+
+            // Type badge
+            const typeBadge = isPdf ? '<span class="file-type-badge pdf">PDF</span>' :
+                              isImage ? '<span class="file-type-badge image">IMG</span>' : ''
+
+            return `
+                <div class="file-sidebar-item ${isImage ? 'has-thumbnail' : ''}" data-ref="${file.ref}" title="${file.path || file.ref}">
+                    <div class="file-sidebar-item-icon">${iconContent}</div>
+                    <div class="file-sidebar-item-info">
+                        <span class="file-sidebar-item-name">@${file.ref}</span>
+                        <span class="file-sidebar-item-meta">${fileSize} ${typeBadge}</span>
+                    </div>
+                    <button class="file-sidebar-item-delete" data-ref="${file.ref}" title="Remove file">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+            `
+        }).join('')
+
+        this.fileSidebarList.innerHTML = fileItems
+
+        // Add click handlers for file items
+        this.fileSidebarList.querySelectorAll('.file-sidebar-item').forEach(item => {
+            // Click on item to insert @reference
+            item.addEventListener('click', (e) => {
+                if (!e.target.closest('.file-sidebar-item-delete')) {
+                    const ref = item.dataset.ref
+                    this.insertFileReference(ref)
+                }
+            })
+
+            // Delete button
+            const deleteBtn = item.querySelector('.file-sidebar-item-delete')
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation()
+                    const ref = deleteBtn.dataset.ref
+                    this.removeFileFromSidebar(ref)
+                })
+            }
+        })
+
+        this.updateFileSidebarStats()
+    }
+
+    insertFileReference(ref) {
+        /**
+         * Insert @reference into message input at cursor position.
+         */
+        if (!this.messageInput || !ref) return
+
+        const input = this.messageInput
+        const start = input.selectionStart
+        const end = input.selectionEnd
+        const text = input.value
+        const refText = `@${ref} `
+
+        // Insert at cursor position
+        input.value = text.substring(0, start) + refText + text.substring(end)
+
+        // Move cursor after inserted reference
+        const newPos = start + refText.length
+        input.setSelectionRange(newPos, newPos)
+        input.focus()
+
+        // Close sidebar on mobile
+        if (window.innerWidth <= 768) {
+            this.closeFileSidebar()
+        }
+    }
+
+    removeFileFromSidebar(ref) {
+        /**
+         * Remove file from sessionFiles array and re-render.
+         * Note: This only removes from UI, not from server.
+         */
+        if (!ref) return
+
+        // Find and remove file
+        const index = this.sessionFiles.findIndex(f => f.ref === ref)
+        if (index !== -1) {
+            this.sessionFiles.splice(index, 1)
+            console.log(`🗑️  Removed file from sidebar: @${ref}`)
+            this.renderFileSidebar()
+        }
+    }
+
+    updateFileSidebarStats() {
+        /**
+         * Update file count and total size in sidebar footer.
+         */
+        const fileCount = this.sessionFiles?.length || 0
+        const totalSize = this.sessionFiles?.reduce((sum, f) => sum + (f.size || 0), 0) || 0
+
+        if (this.fileSidebarCount) {
+            this.fileSidebarCount.textContent = `${fileCount} file${fileCount !== 1 ? 's' : ''}`
+        }
+
+        if (this.fileSidebarSize) {
+            this.fileSidebarSize.textContent = `${this.formatFileSize(totalSize)} used`
+        }
+
+        // Update badge on toggle button
+        this.updateFileSidebarBadge(fileCount)
+    }
+
+    updateFileSidebarBadge(count) {
+        /**
+         * Update the file count badge on the toggle button.
+         */
+        if (!this.fileSidebarToggle) return
+
+        let badge = this.fileSidebarToggle.querySelector('.file-sidebar-badge')
+
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span')
+                badge.className = 'file-sidebar-badge'
+                this.fileSidebarToggle.appendChild(badge)
+            }
+            badge.textContent = count > 99 ? '99+' : count
+            badge.style.display = 'flex'
+        } else if (badge) {
+            badge.style.display = 'none'
+        }
+    }
+
+    getFileIcon(fileType) {
+        /**
+         * Get icon for file type.
+         */
+        const icons = {
+            'image': '🖼️',
+            'pdf': '📄',
+            'document': '📝',
+            'spreadsheet': '📊',
+            'code': '💻',
+            'text': '📃',
+            'archive': '📦',
+            'video': '🎬',
+            'audio': '🎵',
+            'unknown': '📎'
+        }
+        return icons[fileType] || icons['unknown']
+    }
+
+    formatFileSize(bytes) {
+        /**
+         * Format bytes to human readable string.
+         */
+        if (bytes === 0) return '0 B'
+
+        const units = ['B', 'KB', 'MB', 'GB']
+        const k = 1024
+        const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
+    }
+
     createNewSession() {
         /**
          * Create a new session by reconnecting without session_id.
@@ -4707,8 +4925,8 @@ class BassiWebClient {
         this.blocks.clear()
         this.textBuffers.clear()
         this.sessionFiles = []
-        this.stagedFiles = []
         this.sessionId = null
+        this.renderFileSidebar()  // Update file sidebar to show empty state
 
         // Connect without session ID to create new one
         this.connect()

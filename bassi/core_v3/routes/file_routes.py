@@ -54,12 +54,12 @@ def create_file_router(
             file: Uploaded file from multipart/form-data
 
         Returns:
-            JSON with file metadata: path, size, media_type, filename
+            JSON with FileEntry data including @reference name
 
         Raises:
             HTTPException(404): If session not found
             HTTPException(413): If file too large
-            HTTPException(400): If invalid filename
+            HTTPException(400): If invalid filename or registry limits exceeded
         """
         try:
             # Get workspace for this session
@@ -69,20 +69,18 @@ def create_file_router(
                     status_code=404, detail=f"Session not found: {session_id}"
                 )
 
-            # Upload file using UploadService
-            file_path = await upload_service.upload_to_session(
+            # Upload file using UploadService (returns FileEntry)
+            file_path, entry = await upload_service.upload_to_session(
                 file, workspace
             )
 
-            # Get file info
-            file_info = upload_service.get_upload_info(file_path, workspace)
-
             logger.info(
                 f"📁 Uploaded to session {session_id[:8]}: "
-                f"{file.filename} -> {file_info['path']}"
+                f"{file.filename} -> @{entry.ref}"
             )
 
-            return JSONResponse(file_info)
+            # Return FileEntry data for frontend
+            return JSONResponse(entry.to_dict())
 
         except FileTooLargeError as e:
             logger.warning(f"File too large: {file.filename} - {e}")
@@ -90,6 +88,11 @@ def create_file_router(
 
         except InvalidFilenameError as e:
             logger.warning(f"Invalid filename: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+        except ValueError as e:
+            # Registry limits exceeded (max files, max storage, etc.)
+            logger.warning(f"File registry limit: {e}")
             raise HTTPException(status_code=400, detail=str(e))
 
         except Exception as e:
@@ -101,13 +104,15 @@ def create_file_router(
     @router.get("/api/sessions/{session_id}/files")
     async def list_session_files(session_id: str) -> list[dict[str, Any]]:
         """
-        List all files in a session's workspace.
+        List all registered files in a session's workspace.
+
+        Returns FileRegistry entries with @reference names, types, and metadata.
 
         Args:
             session_id: The session ID
 
         Returns:
-            List of file metadata dictionaries
+            List of FileEntry dictionaries with ref, type, size, etc.
 
         Raises:
             HTTPException(404): If session not found
@@ -119,35 +124,8 @@ def create_file_router(
             )
 
         try:
-            files = []
-            workspace_path = workspace.physical_path
-
-            # Metadata and system files to exclude from file list
-            EXCLUDED_FILES = {
-                "chat.json",  # ChatWorkspace metadata (new)
-                "session.json",  # SessionWorkspace metadata (legacy)
-                "session_metadata.json",  # Legacy name
-                "session_state.json",  # SessionService state
-                ".index.json",  # Session index
-                "history.md",  # Conversation history (not a user upload)
-            }
-
-            # List all files in workspace (excluding metadata)
-            for file_path in workspace_path.rglob("*"):
-                if (
-                    file_path.is_file()
-                    and file_path.name not in EXCLUDED_FILES
-                ):
-                    relative_path = file_path.relative_to(workspace_path)
-                    files.append(
-                        {
-                            "path": str(relative_path),
-                            "size": file_path.stat().st_size,
-                            "modified": file_path.stat().st_mtime,
-                        }
-                    )
-
-            return files
+            # Return files from the FileRegistry
+            return workspace.file_registry.to_json()
 
         except Exception as e:
             logger.error(

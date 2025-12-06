@@ -171,7 +171,7 @@ class TestFileUpload:
         content = b"Test file content"
         file = mock_upload_file("test.txt", content)
 
-        file_path = await upload_service.upload_to_session(
+        file_path, _file_entry = await upload_service.upload_to_session(
             file, temp_workspace
         )
 
@@ -211,7 +211,7 @@ class TestFileUpload:
         file = mock_upload_file("report.pdf", b"pdf content")
 
         with patch("bassi.core_v3.upload_service.logger") as mock_logger:
-            file_path = await upload_service.upload_to_session(
+            file_path, _file_entry = await upload_service.upload_to_session(
                 file, temp_workspace
             )
 
@@ -252,7 +252,7 @@ class TestUploadInfo:
         content = b"Test content"
         file = mock_upload_file("document.pdf", content)
 
-        file_path = await upload_service.upload_to_session(
+        file_path, _file_entry = await upload_service.upload_to_session(
             file, temp_workspace
         )
 
@@ -274,7 +274,7 @@ class TestUploadInfo:
         """Should return path relative to workspace."""
         file = mock_upload_file("test.txt", b"content")
 
-        file_path = await upload_service.upload_to_session(
+        file_path, _file_entry = await upload_service.upload_to_session(
             file, temp_workspace
         )
         info = upload_service.get_upload_info(file_path, temp_workspace)

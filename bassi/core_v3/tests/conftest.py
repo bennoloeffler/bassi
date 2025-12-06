@@ -296,7 +296,7 @@ def live_server(tmp_path_factory):
     )
 
     # CRITICAL FIX: Manually start the Agent Pool BEFORE starting server
-    # The @app.on_event("startup") doesn't fire when uvicorn runs in a background thread
+    # The lifespan handler doesn't fire when uvicorn runs in a background thread
     # We must start the pool manually to ensure agents are ready
     print(
         "\n🔧 [TEST] Manually starting Agent Pool with mock factory..."
@@ -315,12 +315,17 @@ def live_server(tmp_path_factory):
 
     app = server_instance.app
 
-    # CRITICAL: Clear startup/shutdown events since we manually started the pool
-    # The @app.on_event("startup") handler would try to start the pool again
-    app.router.on_startup = []
-    app.router.on_shutdown = []
+    # CRITICAL: Replace lifespan with no-op since we manually started the pool
+    # The lifespan handler would try to start the pool again
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def noop_lifespan(app):
+        yield  # No startup/shutdown actions
+
+    app.router.lifespan_context = noop_lifespan
     print(
-        "🔧 [TEST] Cleared FastAPI startup/shutdown events (pool already started)"
+        "🔧 [TEST] Replaced lifespan with no-op (pool already started manually)"
     )
 
     # Configure uvicorn to run in background thread

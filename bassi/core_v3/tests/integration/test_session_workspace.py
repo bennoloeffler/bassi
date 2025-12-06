@@ -93,7 +93,7 @@ class TestFileUpload:
         content = b"Test file content"
         upload_file = mock_upload_file("test.txt", content)
 
-        file_path = await temp_workspace.upload_file(upload_file)
+        file_path, file_entry = await temp_workspace.upload_file(upload_file)
 
         assert file_path.exists()
         assert file_path.parent.name == "DATA_FROM_USER"
@@ -107,7 +107,7 @@ class TestFileUpload:
         content = b"Test content"
         upload_file = mock_upload_file("report.pdf", content)
 
-        file_path = await temp_workspace.upload_file(upload_file)
+        file_path, _file_entry = await temp_workspace.upload_file(upload_file)
 
         # Filename should be: report_{hash}.pdf
         assert file_path.stem.startswith("report_")
@@ -123,11 +123,11 @@ class TestFileUpload:
 
         # Upload first file
         file1 = mock_upload_file("file1.txt", content)
-        path1 = await temp_workspace.upload_file(file1)
+        path1, _entry1 = await temp_workspace.upload_file(file1)
 
         # Upload identical file with different name
         file2 = mock_upload_file("file2.txt", content)
-        path2 = await temp_workspace.upload_file(file2)
+        path2, _entry2 = await temp_workspace.upload_file(file2)
 
         # Should return same path (deduplication)
         assert path1 == path2
@@ -164,7 +164,7 @@ class TestFileUpload:
         large_content = b"x" * (1024 * 1024)
         upload_file = mock_upload_file("large.bin", large_content)
 
-        file_path = await temp_workspace.upload_file(upload_file)
+        file_path, _file_entry = await temp_workspace.upload_file(upload_file)
 
         assert file_path.exists()
         assert file_path.stat().st_size == len(large_content)
@@ -203,7 +203,10 @@ class TestFileUpload:
             upload_file = mock_upload_file(
                 f"parallel_{idx}.txt", f"content-{idx}".encode()
             )
-            return await temp_workspace.upload_file(upload_file)
+            file_path, _file_entry = await temp_workspace.upload_file(
+                upload_file
+            )
+            return file_path
 
         results = await asyncio.gather(
             *(upload(i) for i in range(5)), return_exceptions=False
@@ -458,7 +461,7 @@ class TestWorkspaceContext:
     async def test_workspace_context_lists_uploaded_files(
         self, temp_workspace, mock_upload_file
     ):
-        """Should list uploaded files in workspace context."""
+        """Should list uploaded files in workspace context using @references."""
         # Upload a file
         file = mock_upload_file("test.txt", b"content")
         await temp_workspace.upload_file(file)
@@ -466,19 +469,19 @@ class TestWorkspaceContext:
         context = temp_workspace.get_workspace_context()
 
         assert "## Available Files" in context
-        assert "test_" in context  # File will have hash in name
+        assert "@test.txt" in context  # FileRegistry uses @ref format
 
     @pytest.mark.asyncio
     async def test_workspace_context_includes_file_sizes(
         self, temp_workspace, mock_upload_file
     ):
-        """Should show file size in KB for uploaded files."""
+        """Should show file size from FileRegistry."""
         file = mock_upload_file("data.csv", b"x" * 2048)  # 2 KB
         await temp_workspace.upload_file(file)
 
         context = temp_workspace.get_workspace_context()
 
-        assert "(2.0 KB)" in context
+        assert "2.0 KB" in context  # FileRegistry size_human format
 
     def test_workspace_context_shows_no_files_message(self, temp_workspace):
         """Should show message when no files are uploaded."""

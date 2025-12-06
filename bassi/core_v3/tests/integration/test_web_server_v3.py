@@ -582,11 +582,16 @@ def test_list_session_files_missing_workspace(test_client, web_server):
 
 
 def test_list_session_files_empty_dir(test_client, web_server, tmp_path):
-    """Returns empty list when DATA_FROM_USER is absent."""
+    """Returns empty list when file registry is empty."""
+
+    class MockFileRegistry:
+        def to_json(self):
+            return []
 
     class StubWorkspace:
         def __init__(self, path):
             self.physical_path = path
+            self.file_registry = MockFileRegistry()
 
     workspace = StubWorkspace(tmp_path)
     web_server.connection_manager.workspaces["s1"] = workspace
@@ -597,17 +602,34 @@ def test_list_session_files_empty_dir(test_client, web_server, tmp_path):
     assert response.json() == []
 
 
-def test_list_session_files_returns_metadata(
+def test_list_session_files_returns_file_registry_data(
     test_client, web_server, tmp_path, monkeypatch
 ):
-    """Should emit upload metadata for each file."""
-    # Create file in workspace root
-    file_path = tmp_path / "report.txt"
-    file_path.write_text("hello")
+    """Should return FileEntry data from registry."""
+
+    class MockFileRegistry:
+        def to_json(self):
+            return [
+                {
+                    "ref": "report.txt",
+                    "source": "upload",
+                    "path": "DATA_FROM_USER/report.txt",
+                    "size": 5,
+                    "size_human": "5 B",
+                    "file_type": "document",
+                    "mime_type": "text/plain",
+                    "uploaded_at": "2025-01-01T12:00:00",
+                    "file_id": None,
+                    "thumbnail": None,
+                    "icon": "doc",
+                    "metadata": {},
+                }
+            ]
 
     class StubWorkspace:
         def __init__(self, path):
             self.physical_path = path
+            self.file_registry = MockFileRegistry()
 
     workspace = StubWorkspace(tmp_path)
     web_server.connection_manager.workspaces["s2"] = workspace
@@ -617,28 +639,35 @@ def test_list_session_files_returns_metadata(
     assert response.status_code == 200
     files = response.json()
     assert len(files) == 1
-    assert files[0]["path"] == "report.txt"
+    assert files[0]["ref"] == "report.txt"
     assert files[0]["size"] == 5
-    assert "modified" in files[0]
+    assert files[0]["file_type"] == "document"
+    assert files[0]["source"] == "upload"
 
 
-def test_list_session_files_sorted_by_name(test_client, web_server, tmp_path):
-    """Files should be returned in deterministic (sorted) order."""
-    # Create files directly in workspace root
-    for name in ["c.txt", "a.txt", "b.txt"]:
-        (tmp_path / name).write_text(name)
+def test_list_session_files_multiple_files(test_client, web_server, tmp_path):
+    """Files are returned in order from registry."""
+
+    class MockFileRegistry:
+        def to_json(self):
+            return [
+                {"ref": "a.txt", "source": "upload", "path": "a.txt", "size": 1},
+                {"ref": "b.txt", "source": "upload", "path": "b.txt", "size": 2},
+                {"ref": "c.txt", "source": "upload", "path": "c.txt", "size": 3},
+            ]
 
     class StubWorkspace:
         def __init__(self, path):
             self.physical_path = path
+            self.file_registry = MockFileRegistry()
 
     web_server.connection_manager.workspaces["s3"] = StubWorkspace(tmp_path)
 
     response = test_client.get("/api/sessions/s3/files")
     assert response.status_code == 200
     files = response.json()
-    file_names = sorted([f["path"] for f in files])
-    assert file_names == ["a.txt", "b.txt", "c.txt"]
+    refs = [f["ref"] for f in files]
+    assert refs == ["a.txt", "b.txt", "c.txt"]
 
 
 def test_list_session_files_handles_upload_errors(
@@ -667,9 +696,9 @@ def test_upload_file_success_returns_file_info(
     test_client, web_server, tmp_path
 ):
     """
-    Test successful file upload returns file info.
+    Test successful file upload returns FileEntry data.
 
-    Tests success path in web_server_v3.py lines 310-319.
+    Returns FileEntry from FileRegistry with @ref, size, type, etc.
     """
     from bassi.core_v3.session_workspace import SessionWorkspace
 
@@ -689,15 +718,21 @@ def test_upload_file_success_returns_file_info(
     # Should return 200 OK
     assert response.status_code == 200
 
-    # Should contain file info
+    # Should contain FileEntry data
     data = response.json()
-    assert "name" in data
+    # FileEntry fields
+    assert "ref" in data  # @reference name (e.g., "test.txt")
     assert "size" in data
     assert "path" in data
-    # Upload service adds random suffix for uniqueness (e.g., test_abc123.txt)
-    assert data["name"].startswith("test")
-    assert data["name"].endswith(".txt")
+    assert "source" in data
+    assert "file_type" in data
+    assert "mime_type" in data
+    # Ref should be based on original filename
+    assert data["ref"].startswith("test")
+    assert data["ref"].endswith(".txt")
     assert data["size"] == len(file_content)
+    assert data["source"] == "upload"
+    assert data["file_type"] == "document"  # .txt is a document
 
 
 def test_upload_file_too_large_returns_413(

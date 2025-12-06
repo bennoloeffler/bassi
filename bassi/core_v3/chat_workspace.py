@@ -24,6 +24,8 @@ from typing import Optional
 
 from fastapi import UploadFile
 
+from bassi.core_v3.file_registry import FileRegistry
+
 
 class ChatWorkspace:
     """
@@ -80,6 +82,9 @@ class ChatWorkspace:
             self._create_directory_structure()
 
         self.metadata = self._load_or_create_metadata()
+
+        # Initialize file registry for @reference system
+        self.file_registry = FileRegistry(chat_id, self.physical_path)
 
         # Create initial symlink for new chats
         if create and not self.metadata.get("symlink_name"):
@@ -293,19 +298,23 @@ class ChatWorkspace:
         if self.physical_path.exists():
             shutil.rmtree(self.physical_path)
 
-    async def upload_file(self, file: UploadFile) -> Path:
+    async def upload_file(self, file: UploadFile) -> tuple[Path, "FileEntry"]:
         """
         Upload file to DATA_FROM_USER/ with hash-based deduplication.
+
+        Also registers the file in the FileRegistry for @reference system.
 
         Args:
             file: FastAPI UploadFile object
 
         Returns:
-            Path to saved file
+            Tuple of (Path to saved file, FileEntry from registry)
 
         Raises:
-            ValueError: If file exceeds size limit
+            ValueError: If file exceeds size limit or registry limits exceeded
         """
+        from bassi.core_v3.file_registry import FileEntry
+
         async with self._upload_lock:
             # Validate file size
             file.file.seek(0, 2)  # Seek to end
@@ -317,6 +326,9 @@ class ChatWorkspace:
                     f"File too large: {file_size / 1024 / 1024:.1f} MB "
                     f"(max {self.MAX_FILE_SIZE / 1024 / 1024:.1f} MB)"
                 )
+
+            # Get MIME type
+            mime_type = file.content_type or "application/octet-stream"
 
             # Stream to temporary file while hashing (bounded memory)
             hasher = hashlib.sha256()
@@ -340,9 +352,24 @@ class ChatWorkspace:
             # Check for duplicate by hash
             existing_file = self._find_file_by_hash(file_hash)
             if existing_file:
-                # Remove temp file and return existing
+                # Remove temp file
                 temp_file_path.unlink()
-                return existing_file
+                # Find existing entry in registry or create one
+                existing_ref = existing_file.name
+                existing_entry = self.file_registry.resolve(existing_ref)
+                if existing_entry:
+                    return existing_file, existing_entry
+                # File exists but not in registry - register it
+                relative_path = str(
+                    existing_file.relative_to(self.physical_path)
+                )
+                entry = self.file_registry.register_upload(
+                    filename=file.filename,
+                    path=relative_path,
+                    size=file_size,
+                    mime_type=mime_type,
+                )
+                return existing_file, entry
 
             # Generate unique filename
             filename = self._generate_unique_filename(
@@ -353,6 +380,15 @@ class ChatWorkspace:
             # Rename temp file to final location
             temp_file_path.rename(file_path)
 
+            # Register in file registry
+            relative_path = str(file_path.relative_to(self.physical_path))
+            entry = self.file_registry.register_upload(
+                filename=file.filename,
+                path=relative_path,
+                size=file_size,
+                mime_type=mime_type,
+            )
+
             # Update metadata
             self.metadata["file_count"] = (
                 self.metadata.get("file_count", 0) + 1
@@ -360,7 +396,7 @@ class ChatWorkspace:
             self.metadata["last_activity"] = datetime.now().isoformat()
             self._save_metadata()
 
-            return file_path
+            return file_path, entry
 
     def _find_file_by_hash(self, file_hash: str) -> Optional[Path]:
         """Check if file with same hash already exists."""
@@ -638,32 +674,17 @@ class ChatWorkspace:
             "",
         ]
 
-        # List available files in DATA_FROM_USER
-        uploaded_files = self.list_files()
-
-        if uploaded_files:
-            context_lines.extend(
-                [
-                    "## Available Files",
-                    "",
-                    "The user has uploaded these files:",
-                    "",
-                ]
-            )
-
-            for file_info in uploaded_files:
-                file_size_kb = file_info["size"] / 1024
-                context_lines.append(
-                    f"- `{file_info['path']}` ({file_size_kb:.1f} KB)"
-                )
-
-            context_lines.extend(["", ""])
+        # List available files from FileRegistry (supports @references)
+        file_context = self.file_registry.get_context()
+        if file_context:
+            context_lines.append(file_context)
         else:
             context_lines.extend(
                 [
                     "## Available Files",
                     "",
                     "No files have been uploaded yet.",
+                    "Upload files and reference them with `@filename` in messages.",
                     "",
                 ]
             )
@@ -671,6 +692,11 @@ class ChatWorkspace:
         # Add usage instructions
         context_lines.extend(
             [
+                "## File References",
+                "",
+                "Users can reference files with `@filename` in messages.",
+                "When you see `@filename`, the user is referring to an uploaded file.",
+                "",
                 "## File Path Instructions",
                 "",
                 "When working with files:",

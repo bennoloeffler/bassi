@@ -15,6 +15,7 @@ See docs/features_concepts/chat_context_architecture.md for details.
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -171,7 +172,30 @@ class WebUIServerV3:
 
     def _create_app(self) -> FastAPI:
         """Create and configure FastAPI application."""
-        app = FastAPI(title="Bassi Web UI", version="3.0.0")
+        # Lifespan context manager for startup/shutdown (replaces deprecated on_event)
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # Startup: Initialize agent pool (idempotent - safe to call multiple times)
+            logger.info(
+                f"🚀 [SERVER] STARTUP EVENT - pool_id={id(self.agent_pool)}, started={self.agent_pool._started}, shutdown={self.agent_pool._shutdown}"
+            )
+            # Always call start() - it handles hot reload internally
+            # This ensures _shutdown is properly reset even if _started is True
+            await self.agent_pool.start()
+            stats = self.agent_pool.get_stats()
+            logger.info(
+                f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, "
+                f"available={stats['available']}, pool_id={id(self.agent_pool)}"
+            )
+            yield
+            # Shutdown: Only shutdown on real server stop, not hot reload
+            logger.info(
+                f"🛑 [SERVER] SHUTDOWN EVENT - pool_id={id(self.agent_pool)}"
+            )
+            await self.agent_pool.shutdown()
+            logger.info("✅ [SERVER] Agent pool shutdown complete")
+
+        app = FastAPI(title="Bassi Web UI", version="3.0.0", lifespan=lifespan)
 
         # CORS middleware
         app.add_middleware(
@@ -189,30 +213,6 @@ class WebUIServerV3:
             StaticFiles(directory=str(static_dir)),
             name="static",
         )
-
-        # Startup: Initialize agent pool (idempotent - safe to call multiple times)
-        @app.on_event("startup")
-        async def startup():
-            logger.info(
-                f"🚀 [SERVER] STARTUP EVENT - pool_id={id(self.agent_pool)}, started={self.agent_pool._started}, shutdown={self.agent_pool._shutdown}"
-            )
-            # Always call start() - it handles hot reload internally
-            # This ensures _shutdown is properly reset even if _started is True
-            await self.agent_pool.start()
-            stats = self.agent_pool.get_stats()
-            logger.info(
-                f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, "
-                f"available={stats['available']}, pool_id={id(self.agent_pool)}"
-            )
-
-        # Shutdown: Only shutdown on real server stop, not hot reload
-        @app.on_event("shutdown")
-        async def shutdown():
-            logger.info(
-                f"🛑 [SERVER] SHUTDOWN EVENT - pool_id={id(self.agent_pool)}"
-            )
-            await self.agent_pool.shutdown()
-            logger.info("✅ [SERVER] Agent pool shutdown complete")
 
         # Health check
         @app.get("/health")

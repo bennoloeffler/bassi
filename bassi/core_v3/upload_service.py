@@ -15,11 +15,14 @@ only the public interface matters.
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import UploadFile
 
 from bassi.core_v3.session_workspace import SessionWorkspace
+
+if TYPE_CHECKING:
+    from bassi.core_v3.file_registry import FileEntry
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ class UploadService:
 
     async def upload_to_session(
         self, file: UploadFile, workspace: SessionWorkspace
-    ) -> Path:
+    ) -> tuple[Path, "FileEntry"]:
         """
         Upload file to session workspace.
 
@@ -104,7 +107,7 @@ class UploadService:
             workspace: SessionWorkspace to upload to
 
         Returns:
-            Path to uploaded file
+            Tuple of (Path to uploaded file, FileEntry from registry)
 
         Raises:
             FileTooLargeError: File exceeds size limit
@@ -116,13 +119,14 @@ class UploadService:
             self.validate_file(file)
 
             # Upload to workspace (handles deduplication, etc.)
-            file_path = await workspace.upload_file(file)
+            file_path, entry = await workspace.upload_file(file)
 
             logger.info(
-                f"File uploaded successfully: {file.filename} -> {file_path}"
+                f"File uploaded successfully: {file.filename} -> {file_path} "
+                f"(ref: @{entry.ref})"
             )
 
-            return file_path
+            return file_path, entry
 
         except FileTooLargeError:
             raise  # Re-raise validation errors as-is
