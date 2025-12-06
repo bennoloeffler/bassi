@@ -176,7 +176,7 @@ async def test_workspace_files_removed(tmp_path):
     Verify:
     - Physical directory is deleted
     - Symlink is removed
-    - session.json is gone
+    - chat.json is gone
     - history.md is gone
     """
     session_id = "test-files-removal"
@@ -188,7 +188,7 @@ async def test_workspace_files_removed(tmp_path):
     # Verify files exist
     physical_path = workspace.physical_path
     assert physical_path.exists()
-    assert (physical_path / "session.json").exists()
+    assert (physical_path / "chat.json").exists()
     assert (physical_path / "history.md").exists()
 
     # Check if symlink exists (may not in test environment)
@@ -200,7 +200,7 @@ async def test_workspace_files_removed(tmp_path):
 
     # Verify all files removed
     assert not physical_path.exists(), "Physical directory should be deleted"
-    assert not (physical_path / "session.json").exists()
+    assert not (physical_path / "chat.json").exists()
     assert not (physical_path / "history.md").exists()
 
     if has_symlink:

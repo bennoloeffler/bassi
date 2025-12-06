@@ -80,9 +80,18 @@ class PermissionManager:
             PermissionResultDeny,
         )
 
+        # DEBUG: Log that callback is being invoked
+        logger.info(
+            f"🔐🔐🔐 [PERMISSION] can_use_tool_callback INVOKED for tool: {tool_name}"
+        )
+
         # 1. Check global bypass
-        if self.config_service.get_global_bypass_permissions():
-            logger.debug(f"🔓 Tool '{tool_name}' allowed (global bypass)")
+        global_bypass = self.config_service.get_global_bypass_permissions()
+        logger.info(
+            f"🔐 [PERMISSION] global_bypass_permissions = {global_bypass}"
+        )
+        if global_bypass:
+            logger.info(f"🔓 Tool '{tool_name}' allowed (global bypass)")
             return PermissionResultAllow()
 
         # 2. Check one-time permission

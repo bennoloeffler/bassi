@@ -197,22 +197,22 @@ def test_workspace_stats_after_messages(workspace):
 
 def test_metadata_persists_to_disk(workspace):
     """
-    Test that message_count is persisted to session.json.
+    Test that message_count is persisted to chat.json.
     """
     # Save messages
     workspace.save_message("user", "Test")
     workspace.save_message("assistant", "Response")
 
-    # Read session.json directly
-    session_json_path = workspace.physical_path / "session.json"
-    assert session_json_path.exists()
+    # Read chat.json directly (renamed from session.json)
+    chat_json_path = workspace.physical_path / "chat.json"
+    assert chat_json_path.exists()
 
-    with open(session_json_path) as f:
+    with open(chat_json_path) as f:
         metadata = json.load(f)
 
     assert metadata["message_count"] == 2
 
-    print("✅ Message count persisted to session.json")
+    print("✅ Message count persisted to chat.json")
 
 
 def test_reload_workspace_preserves_count(tmp_path):

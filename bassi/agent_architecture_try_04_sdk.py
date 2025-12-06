@@ -10,13 +10,17 @@ and session; no cross-user sharing.
 import asyncio
 import uuid
 
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
-from websockets.exceptions import ConnectionClosed
-from websockets.http import Headers
-
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.client import ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
+from websockets.exceptions import ConnectionClosed
+from websockets.http import Headers
 
 from bassi.agent_architecture_utils_common import (
     basic_html,
@@ -24,7 +28,9 @@ from bassi.agent_architecture_utils_common import (
 )
 
 
-async def stream_response(client: ClaudeSDKClient, conn: ServerConnection) -> None:
+async def stream_response(
+    client: ClaudeSDKClient, conn: ServerConnection
+) -> None:
     """Stream assistant text blocks back to the websocket."""
     async for msg in client.receive_response():
         if isinstance(msg, AssistantMessage):
@@ -73,7 +79,9 @@ async def main(http_port: int = 9331, ws_port: int = 9332) -> None:
         "One ClaudeSDKClient per websocket; session_id is reused so the model remembers prior messages.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
     print(
         f"[try04-sdk] HTTP http://127.0.0.1:{http_port} | "
         f"WS ws://127.0.0.1:{ws_port}/ws"

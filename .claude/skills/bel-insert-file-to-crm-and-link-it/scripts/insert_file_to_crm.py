@@ -32,37 +32,36 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, List
-
+from typing import List, Optional
 
 # MIME type mapping for common file extensions
 MIME_TYPE_MAP = {
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.doc': 'application/msword',
-    '.pdf': 'application/pdf',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.txt': 'text/plain',
-    '.csv': 'text/csv',
-    '.json': 'application/json',
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
 }
 
 # File type categories
 FILE_TYPE_MAP = {
-    'image/jpeg': 'image',
-    'image/png': 'image',
-    'image/gif': 'image',
-    'application/pdf': 'document',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'spreadsheet',
-    'application/vnd.ms-excel': 'spreadsheet',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document',
-    'application/msword': 'document',
-    'text/plain': 'document',
-    'text/csv': 'spreadsheet',
+    "image/jpeg": "image",
+    "image/png": "image",
+    "image/gif": "image",
+    "application/pdf": "document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "spreadsheet",
+    "application/vnd.ms-excel": "spreadsheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "application/msword": "document",
+    "text/plain": "document",
+    "text/csv": "spreadsheet",
 }
 
 
@@ -80,12 +79,12 @@ def detect_mime_type(file_path: Path) -> str:
         return mime_type
 
     # Default to binary
-    return 'application/octet-stream'
+    return "application/octet-stream"
 
 
 def get_file_type(mime_type: str) -> str:
     """Get file type category from MIME type."""
-    return FILE_TYPE_MAP.get(mime_type, 'other')
+    return FILE_TYPE_MAP.get(mime_type, "other")
 
 
 def encode_file(file_path: Path) -> tuple[str, str, int]:
@@ -95,14 +94,14 @@ def encode_file(file_path: Path) -> tuple[str, str, int]:
     Returns:
         (base64_data, sha256_hash, file_size)
     """
-    with open(file_path, 'rb') as f:
+    with open(file_path, "rb") as f:
         file_data = f.read()
 
     # Calculate hash
     file_hash = hashlib.sha256(file_data).hexdigest()
 
     # Encode as base64
-    file_b64 = base64.b64encode(file_data).decode('utf-8')
+    file_b64 = base64.b64encode(file_data).decode("utf-8")
 
     return file_b64, file_hash, len(file_data)
 
@@ -130,11 +129,11 @@ def generate_sql_insert(
     """Generate SQL INSERT statement for data_files table."""
 
     # Build tags JSON
-    tags_json = 'NULL'
+    tags_json = "NULL"
     if tags:
         tags_dict = {
-            'type': tags,
-            'imported_by': os.environ.get('USER', 'unknown')
+            "type": tags,
+            "imported_by": os.environ.get("USER", "unknown"),
         }
         tags_json = f"'{escape_sql_string(json.dumps(tags_dict))}'::jsonb"
 
@@ -181,42 +180,40 @@ def execute_sql(sql: str, db_config: dict) -> dict:
     import tempfile
 
     # Write SQL to temporary file to avoid argument length limits
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".sql", delete=False
+    ) as tmp:
         tmp.write(sql)
         tmp_path = tmp.name
 
     try:
         psql_cmd = [
-            'psql',
-            '-h', db_config['host'],
-            '-U', db_config['user'],
-            '-d', db_config['database'],
-            '-f', tmp_path,  # Read from file instead of -c
-            '-t',  # Tuples only (no headers)
-            '-A',  # Unaligned output
+            "psql",
+            "-h",
+            db_config["host"],
+            "-U",
+            db_config["user"],
+            "-d",
+            db_config["database"],
+            "-f",
+            tmp_path,  # Read from file instead of -c
+            "-t",  # Tuples only (no headers)
+            "-A",  # Unaligned output
         ]
 
         env = os.environ.copy()
-        env['PGPASSWORD'] = db_config['password']
+        env["PGPASSWORD"] = db_config["password"]
 
         result = subprocess.run(
-            psql_cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True
+            psql_cmd, env=env, capture_output=True, text=True, check=True
         )
         return {
-            'success': True,
-            'output': result.stdout.strip(),
-            'error': None
+            "success": True,
+            "output": result.stdout.strip(),
+            "error": None,
         }
     except subprocess.CalledProcessError as e:
-        return {
-            'success': False,
-            'output': None,
-            'error': e.stderr
-        }
+        return {"success": False, "output": None, "error": e.stderr}
     finally:
         # Clean up temporary file
         try:
@@ -227,55 +224,67 @@ def execute_sql(sql: str, db_config: dict) -> dict:
 
 def get_db_config() -> dict:
     """Get database configuration from .mcp.json."""
-    mcp_config_path = Path.home() / 'projects/ai/bassi/.mcp.json'
+    mcp_config_path = Path.home() / "projects/ai/bassi/.mcp.json"
 
     if not mcp_config_path.exists():
-        print(f"❌ MCP config not found at {mcp_config_path}", file=sys.stderr)
+        print(
+            f"❌ MCP config not found at {mcp_config_path}", file=sys.stderr
+        )
         sys.exit(1)
 
     with open(mcp_config_path) as f:
         mcp_config = json.load(f)
 
-    pg_config = mcp_config.get('mcpServers', {}).get('postgresql', {})
-    args = pg_config.get('args', [])
+    pg_config = mcp_config.get("mcpServers", {}).get("postgresql", {})
+    args = pg_config.get("args", [])
 
     # Parse args to get connection details
     db_config = {
-        'host': 'localhost',
-        'database': 'crm_data_bassi',
-        'user': 'postgres',
-        'password': 'somethingsecure'
+        "host": "localhost",
+        "database": "crm_data_bassi",
+        "user": "postgres",
+        "password": "somethingsecure",
     }
 
     # Override with values from args if present
     for i, arg in enumerate(args):
-        if arg == '--host' and i + 1 < len(args):
-            db_config['host'] = args[i + 1]
-        elif arg == '--database' and i + 1 < len(args):
-            db_config['database'] = args[i + 1]
-        elif arg == '--user' and i + 1 < len(args):
-            db_config['user'] = args[i + 1]
-        elif arg == '--password' and i + 1 < len(args):
-            db_config['password'] = args[i + 1]
+        if arg == "--host" and i + 1 < len(args):
+            db_config["host"] = args[i + 1]
+        elif arg == "--database" and i + 1 < len(args):
+            db_config["database"] = args[i + 1]
+        elif arg == "--user" and i + 1 < len(args):
+            db_config["user"] = args[i + 1]
+        elif arg == "--password" and i + 1 < len(args):
+            db_config["password"] = args[i + 1]
 
     return db_config
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Insert a file into the CRM database',
+        description="Insert a file into the CRM database",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
 
-    parser.add_argument('file_path', help='Path to the file to insert')
-    parser.add_argument('--company-id', type=int, help='Company site ID to link to')
-    parser.add_argument('--person-id', type=int, help='Person ID to link to')
-    parser.add_argument('--event-id', type=int, help='Event ID to link to')
-    parser.add_argument('--opportunity-id', type=int, help='Sales opportunity ID to link to')
-    parser.add_argument('--description', help='Description of the file')
-    parser.add_argument('--tags', help='Comma-separated tags (e.g., crm,leads,contacts)')
-    parser.add_argument('--dry-run', action='store_true', help='Generate SQL but do not execute')
+    parser.add_argument("file_path", help="Path to the file to insert")
+    parser.add_argument(
+        "--company-id", type=int, help="Company site ID to link to"
+    )
+    parser.add_argument("--person-id", type=int, help="Person ID to link to")
+    parser.add_argument("--event-id", type=int, help="Event ID to link to")
+    parser.add_argument(
+        "--opportunity-id", type=int, help="Sales opportunity ID to link to"
+    )
+    parser.add_argument("--description", help="Description of the file")
+    parser.add_argument(
+        "--tags", help="Comma-separated tags (e.g., crm,leads,contacts)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Generate SQL but do not execute",
+    )
 
     args = parser.parse_args()
 
@@ -286,8 +295,13 @@ def main():
         sys.exit(1)
 
     # Validate at least one link is provided
-    if not any([args.company_id, args.person_id, args.event_id, args.opportunity_id]):
-        print("❌ At least one of --company-id, --person-id, --event-id, or --opportunity-id must be specified", file=sys.stderr)
+    if not any(
+        [args.company_id, args.person_id, args.event_id, args.opportunity_id]
+    ):
+        print(
+            "❌ At least one of --company-id, --person-id, --event-id, or --opportunity-id must be specified",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print(f"📄 Processing file: {file_path.name}")
@@ -307,7 +321,7 @@ def main():
     # Parse tags
     tags_list = None
     if args.tags:
-        tags_list = [tag.strip() for tag in args.tags.split(',')]
+        tags_list = [tag.strip() for tag in args.tags.split(",")]
         print(f"   Tags: {', '.join(tags_list)}")
 
     # Generate SQL
@@ -329,9 +343,9 @@ def main():
     )
 
     if args.dry_run:
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("DRY RUN - SQL would be:")
-        print("="*80)
+        print("=" * 80)
         # Show first 500 chars of SQL (without the huge base64 data)
         sql_preview = sql[:500] + "...[base64 data]..." + sql[-200:]
         print(sql_preview)
@@ -344,15 +358,15 @@ def main():
     print("💾 Inserting into database...")
     result = execute_sql(sql, db_config)
 
-    if result['success']:
+    if result["success"]:
         print("✅ File inserted successfully!")
-        if result['output']:
+        if result["output"]:
             print(f"   {result['output']}")
     else:
-        print(f"❌ Failed to insert file:", file=sys.stderr)
+        print("❌ Failed to insert file:", file=sys.stderr)
         print(f"   {result['error']}", file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

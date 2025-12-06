@@ -308,6 +308,10 @@ class BrowserSessionManager:
                 }
             )
 
+        # Log current model on agent activation
+        model_id = agent.get_model_id()
+        logger.info(f"🤖 [AGENT] Session activated with model: {model_id}")
+
     async def _message_loop(
         self,
         websocket: WebSocket,
@@ -480,3 +484,112 @@ class BrowserSessionManager:
             "active_chats": len(self.active_sessions),
             "pool_stats": self.agent_pool.get_stats(),
         }
+
+    async def swap_agent_for_thinking_mode(
+        self,
+        browser_id: str,
+        thinking_mode: bool,
+    ) -> bool:
+        """
+        Swap current agent for one with different thinking mode config.
+
+        Since max_thinking_tokens cannot be changed at runtime (SDK limitation),
+        we need to:
+        1. Save conversation history from current agent
+        2. Release current agent back to pool
+        3. Create new agent with thinking mode config
+        4. Connect new agent
+        5. Restore conversation history to new agent
+
+        This preserves the chat context while enabling/disabling thinking mode.
+
+        Args:
+            browser_id: Browser session ID
+            thinking_mode: Whether to enable extended thinking
+
+        Returns:
+            True on success, False on failure
+        """
+        browser_session = self.browser_sessions.get(browser_id)
+        if not browser_session:
+            logger.error(f"❌ [WS] Browser {browser_id[:8]} not found")
+            return False
+
+        chat_id = browser_session.current_chat_id
+        old_agent = browser_session.agent
+        workspace = browser_session.workspace
+
+        logger.info(
+            f"🔄 [WS] Swapping agent for browser {browser_id[:8]}, "
+            f"thinking_mode={thinking_mode}"
+        )
+
+        try:
+            # Step 1: Save conversation history from workspace
+            history = []
+            if workspace:
+                history = workspace.load_conversation_history()
+                logger.info(
+                    f"📝 [WS] Saved {len(history)} messages from workspace"
+                )
+
+            # Step 2: Release old agent back to pool
+            # This resets the agent's state but keeps it connected
+            if old_agent:
+                await self.agent_pool.release(old_agent)
+                logger.info("🔄 [WS] Released old agent to pool")
+
+            # Step 3: Create new agent with thinking mode config
+            from bassi.core_v3.web_server_v3 import (
+                create_thinking_mode_agent_factory,
+            )
+
+            factory = create_thinking_mode_agent_factory(
+                permission_manager=self.permission_manager,
+                thinking_mode=thinking_mode,
+            )
+            new_agent = factory()
+            logger.info(
+                f"🧠 [WS] Created new agent with thinking_mode={thinking_mode}"
+            )
+
+            # Step 4: Connect new agent
+            await new_agent.connect()
+            logger.info("🔌 [WS] New agent connected")
+
+            # Step 5: Prepare agent for session
+            is_resuming = ChatWorkspace.exists(
+                chat_id, base_path=self.workspace_base_path
+            )
+            await new_agent.prepare_for_session(
+                session_id=chat_id,
+                resume=is_resuming,
+            )
+
+            # Step 6: Restore conversation history to new agent
+            if history:
+                new_agent.restore_conversation_history(history)
+                logger.info(
+                    f"✅ [WS] Restored {len(history)} messages to new agent"
+                )
+
+            # Step 7: Attach workspace and services to new agent
+            new_agent.workspace = workspace
+            new_agent.question_service = browser_session.question_service
+            new_agent.current_workspace_id = chat_id
+
+            # Step 8: Update browser session
+            browser_session.agent = new_agent
+
+            # Update legacy dicts
+            self.active_sessions[chat_id] = new_agent
+
+            logger.info(
+                f"✅ [WS] Agent swap complete for browser {browser_id[:8]}, "
+                f"thinking_mode={thinking_mode}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ [WS] Failed to swap agent: {e}", exc_info=True)
+            return False

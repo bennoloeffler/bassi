@@ -81,11 +81,9 @@ def test_upload_button_exists(page, live_server):
     assert upload_button is not None, "Upload button should exist"
     assert upload_button.is_visible(), "Upload button should be visible"
 
-    # Verify button has correct icon
-    button_text = upload_button.text_content()
-    assert (
-        "📎" in button_text
-    ), f"Upload button should have paperclip icon, got: {button_text}"
+    # Verify button has SVG icon (plus sign icon in HTML)
+    svg_icon = upload_button.query_selector("svg")
+    assert svg_icon is not None, "Upload button should contain SVG icon"
 
     print("✅ Upload button exists and is visible")
 

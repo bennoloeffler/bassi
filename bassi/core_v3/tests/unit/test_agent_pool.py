@@ -1,11 +1,14 @@
 """Unit tests for agent_pool.py - Context isolation and agent lifecycle."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bassi.core_v3.services.agent_pool import AgentPool, PooledAgent, reset_agent_pool
+from bassi.core_v3.services.agent_pool import (
+    AgentPool,
+    PooledAgent,
+    reset_agent_pool,
+)
 
 
 @pytest.fixture
@@ -28,8 +31,10 @@ def mock_agent():
 @pytest.fixture
 def mock_agent_factory(mock_agent):
     """Create a factory that returns the mock agent."""
+
     def factory():
         return mock_agent
+
     return factory
 
 
@@ -45,7 +50,9 @@ class TestAgentPoolRelease:
     """Tests for agent release and context isolation."""
 
     @pytest.mark.asyncio
-    async def test_release_clears_conversation_context(self, mock_agent, mock_agent_factory):
+    async def test_release_clears_conversation_context(
+        self, mock_agent, mock_agent_factory
+    ):
         """
         CRITICAL: Test that releasing an agent clears _conversation_context.
 
@@ -61,7 +68,9 @@ class TestAgentPoolRelease:
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
 
         # Manually add the agent to pool (skip actual connection)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         # Verify agent has conversation context
@@ -78,10 +87,14 @@ class TestAgentPoolRelease:
         )
 
     @pytest.mark.asyncio
-    async def test_release_clears_message_history(self, mock_agent, mock_agent_factory):
+    async def test_release_clears_message_history(
+        self, mock_agent, mock_agent_factory
+    ):
         """Test that releasing an agent clears message_history."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         assert len(mock_agent.message_history) > 0
@@ -95,7 +108,9 @@ class TestAgentPoolRelease:
     async def test_release_clears_stats(self, mock_agent, mock_agent_factory):
         """Test that releasing an agent resets stats."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         await pool.release(mock_agent)
@@ -104,10 +119,14 @@ class TestAgentPoolRelease:
         assert mock_agent.stats.tool_calls == 0
 
     @pytest.mark.asyncio
-    async def test_release_clears_workspace_id(self, mock_agent, mock_agent_factory):
+    async def test_release_clears_workspace_id(
+        self, mock_agent, mock_agent_factory
+    ):
         """Test that releasing an agent clears current_workspace_id."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         assert mock_agent.current_workspace_id is not None
@@ -117,10 +136,14 @@ class TestAgentPoolRelease:
         assert mock_agent.current_workspace_id is None
 
     @pytest.mark.asyncio
-    async def test_release_clears_workspace_reference(self, mock_agent, mock_agent_factory):
+    async def test_release_clears_workspace_reference(
+        self, mock_agent, mock_agent_factory
+    ):
         """Test that releasing an agent clears workspace reference."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         assert mock_agent.workspace is not None
@@ -130,10 +153,14 @@ class TestAgentPoolRelease:
         assert mock_agent.workspace is None
 
     @pytest.mark.asyncio
-    async def test_release_clears_question_service(self, mock_agent, mock_agent_factory):
+    async def test_release_clears_question_service(
+        self, mock_agent, mock_agent_factory
+    ):
         """Test that releasing an agent clears question_service reference."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
         pool._started = True
 
         assert mock_agent.question_service is not None
@@ -143,10 +170,14 @@ class TestAgentPoolRelease:
         assert mock_agent.question_service is None
 
     @pytest.mark.asyncio
-    async def test_release_marks_agent_available(self, mock_agent, mock_agent_factory):
+    async def test_release_marks_agent_available(
+        self, mock_agent, mock_agent_factory
+    ):
         """Test that releasing an agent marks it as available."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pooled = PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        pooled = PooledAgent(
+            agent=mock_agent, in_use=True, browser_id="browser-1"
+        )
         pool._agents.append(pooled)
         pool._started = True
 

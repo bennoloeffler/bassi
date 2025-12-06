@@ -1283,6 +1283,34 @@ class WebUIServerV3:
                                     f"❌ No display ID for tool_use_id: {tool_use_id}"
                                 )
 
+                            # Auto-escalation: Track tool success/failure
+                            is_error = event.get("is_error", False)
+                            browser_session = self.browser_session_manager.get_session_by_chat_id(
+                                connection_id
+                            )
+                            if (
+                                browser_session
+                                and browser_session.model_tracker
+                            ):
+                                if is_error:
+                                    logger.warning(
+                                        "⚠️ Tool error detected - tracking for auto-escalation"
+                                    )
+                                    new_level = (
+                                        browser_session.model_tracker.on_failure()
+                                    )
+                                    if new_level:
+                                        # Escalation triggered!
+                                        await self._handle_model_escalation(
+                                            websocket,
+                                            session,
+                                            browser_session,
+                                            new_level,
+                                        )
+                                else:
+                                    # Success - reset failure counter
+                                    browser_session.model_tracker.on_success()
+
                         elif event_type == "thinking":
                             # Create thinking block ID
                             thinking_id = f"msg-{message_counter}-thinking-0"
@@ -1531,6 +1559,34 @@ Now continue with the interrupted task/plan/intention. Go on..."""
                                     f"❌ No display ID for tool_use_id: {tool_use_id}"
                                 )
 
+                            # Auto-escalation: Track tool success/failure
+                            is_error = event.get("is_error", False)
+                            browser_session = self.browser_session_manager.get_session_by_chat_id(
+                                connection_id
+                            )
+                            if (
+                                browser_session
+                                and browser_session.model_tracker
+                            ):
+                                if is_error:
+                                    logger.warning(
+                                        "⚠️ Tool error detected - tracking for auto-escalation"
+                                    )
+                                    new_level = (
+                                        browser_session.model_tracker.on_failure()
+                                    )
+                                    if new_level:
+                                        # Escalation triggered!
+                                        await self._handle_model_escalation(
+                                            websocket,
+                                            session,
+                                            browser_session,
+                                            new_level,
+                                        )
+                                else:
+                                    # Success - reset failure counter
+                                    browser_session.model_tracker.on_success()
+
                         elif event_type == "thinking":
                             # Create thinking block ID
                             thinking_id = f"msg-{message_counter}-thinking-0"
@@ -1624,16 +1680,59 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
             if thinking_mode is not None:
                 try:
-                    await session.update_thinking_mode(thinking_mode)
-                    await websocket.send_json(
-                        {
-                            "type": "config_updated",
-                            "thinking_mode": thinking_mode,
-                        }
-                    )
-                    logger.info(
-                        f"✅ Thinking mode updated to: {thinking_mode}"
-                    )
+                    # Thinking mode requires agent swap (SDK limitation:
+                    # max_thinking_tokens cannot be changed at runtime)
+                    # Use browser_session_manager to swap agents while
+                    # preserving chat context
+                    if hasattr(self, "browser_session_manager"):
+                        # New architecture: use agent swap
+                        browser_session = self.browser_session_manager.get_session_by_chat_id(
+                            connection_id
+                        )
+                        if browser_session:
+                            success = await self.browser_session_manager.swap_agent_for_thinking_mode(
+                                browser_session.browser_id,
+                                thinking_mode,
+                            )
+                            if success:
+                                # Update session reference to new agent
+                                session = browser_session.agent
+                                await websocket.send_json(
+                                    {
+                                        "type": "config_updated",
+                                        "thinking_mode": thinking_mode,
+                                    }
+                                )
+                                logger.info(
+                                    f"✅ Thinking mode updated to: {thinking_mode}"
+                                )
+                            else:
+                                raise RuntimeError("Agent swap failed")
+                        else:
+                            # Fallback: old method (may fail with task error)
+                            logger.warning(
+                                "⚠️ Browser session not found, "
+                                "using legacy update method"
+                            )
+                            await session.update_thinking_mode(thinking_mode)
+                            await websocket.send_json(
+                                {
+                                    "type": "config_updated",
+                                    "thinking_mode": thinking_mode,
+                                }
+                            )
+                    else:
+                        # Legacy path (old architecture without pool)
+                        await session.update_thinking_mode(thinking_mode)
+                        await websocket.send_json(
+                            {
+                                "type": "config_updated",
+                                "thinking_mode": thinking_mode,
+                            }
+                        )
+                        logger.info(
+                            f"✅ Thinking mode updated to: {thinking_mode}"
+                        )
                 except Exception as e:
                     logger.error(
                         f"❌ Error updating thinking mode: {e}", exc_info=True
@@ -1821,6 +1920,90 @@ Now continue with the interrupted task/plan/intention. Go on..."""
 
             except Exception as e:
                 logger.error(f"Failed to save image {filename}: {e}")
+
+    async def _handle_model_escalation(
+        self,
+        websocket: WebSocket,
+        session: "BassiAgentSession",
+        browser_session: "BrowserSession",
+        new_level: int,
+    ) -> None:
+        """
+        Handle model escalation triggered by consecutive tool failures.
+
+        This method:
+        1. Changes the model via SDK (no reconnection needed)
+        2. Sends notification to user about the escalation
+
+        Args:
+            websocket: WebSocket connection to send notifications
+            session: Agent session for model switching
+            browser_session: Browser session with model tracker state
+            new_level: The new model level (2=Sonnet, 3=Opus)
+        """
+        from bassi.core_v3.services.model_service import (
+            get_model_id,
+            get_model_info,
+        )
+
+        try:
+            # Get model info for display
+            model_info = get_model_info(new_level)
+            model_id = get_model_id(new_level)
+            old_level = new_level - 1
+            old_model_info = get_model_info(old_level)
+
+            logger.warning(
+                f"🚨 Auto-escalating model: {old_model_info.name} → {model_info.name} "
+                f"(after 3 consecutive tool failures)"
+            )
+
+            # Change model via SDK (no reconnection needed!)
+            await session.set_model(model_id)
+
+            # Notify user about escalation
+            await websocket.send_json(
+                {
+                    "type": "model_escalated",
+                    "old_level": old_level,
+                    "new_level": new_level,
+                    "old_model_name": old_model_info.name,
+                    "new_model_name": model_info.name,
+                    "reason": "auto_escalation",
+                    "message": (
+                        f"⚠️ Auto-escalated to {model_info.name} after 3 "
+                        f"consecutive tool failures"
+                    ),
+                }
+            )
+
+            # Also send as status update for visibility in chat
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "message": (
+                        f"🔄 Model upgraded: {old_model_info.name} → {model_info.name} "
+                        f"(auto-escalation after tool failures)"
+                    ),
+                }
+            )
+
+            logger.info(
+                f"✅ Model escalation complete: now using {model_info.name}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to escalate model to level {new_level}: {e}",
+                exc_info=True,
+            )
+            # Don't fail silently - notify user of the issue
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f"Failed to auto-escalate model: {str(e)}",
+                }
+            )
 
     async def run(self, reload: bool = False):
         """

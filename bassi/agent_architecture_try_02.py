@@ -15,7 +15,12 @@ Behavior:
 import asyncio
 from dataclasses import dataclass
 
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
 from websockets.exceptions import ConnectionClosed
 from websockets.http import Headers
 
@@ -74,7 +79,9 @@ class QueueServer:
             await ws.send("server busy: queue full")
             return
         self.job_counter += 1
-        await self.queue.put(Job(ws=ws, prompt=prompt, job_id=self.job_counter))
+        await self.queue.put(
+            Job(ws=ws, prompt=prompt, job_id=self.job_counter)
+        )
 
     async def stop(self) -> None:
         await self.agent.disconnect()
@@ -101,7 +108,9 @@ async def main(http_port: int = 9011, ws_port: int = 9012) -> None:
         "Multiple clients allowed; prompts are serialized through one agent.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
 
     print(
         f"[try02] HTTP http://127.0.0.1:{http_port}  | "

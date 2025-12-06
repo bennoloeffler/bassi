@@ -16,7 +16,6 @@ Migration:
     index = ChatIndex(base_path)
 """
 
-import warnings
 
 # Re-export ChatIndex as SessionIndex for backward compatibility
 from bassi.core_v3.chat_index import ChatIndex

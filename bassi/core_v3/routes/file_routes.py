@@ -11,7 +11,6 @@ DEPENDENCIES: UploadService, workspace manager
 
 import logging
 import mimetypes
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile

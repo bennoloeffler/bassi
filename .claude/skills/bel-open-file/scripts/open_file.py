@@ -81,14 +81,10 @@ def main():
         description="Open a file with the OS default application"
     )
     parser.add_argument(
-        "file_path",
-        type=str,
-        help="Path to the file to open"
+        "file_path", type=str, help="Path to the file to open"
     )
     parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress output messages"
+        "--quiet", action="store_true", help="Suppress output messages"
     )
 
     args = parser.parse_args()

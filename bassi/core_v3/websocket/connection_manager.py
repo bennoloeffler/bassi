@@ -99,7 +99,9 @@ class ConnectionManager:
         logger.info("🔷 [WS] Accepting WebSocket connection...")
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"🔷 [WS] WebSocket accepted. Total connections: {len(self.active_connections)}")
+        logger.info(
+            f"🔷 [WS] WebSocket accepted. Total connections: {len(self.active_connections)}"
+        )
 
         # Set websocket on permission_manager for sending permission requests
         if self.permission_manager:
@@ -146,6 +148,7 @@ class ConnectionManager:
 
         # Update permission mode if changed
         from bassi.shared.permission_config import get_permission_mode
+
         current_permission_mode = get_permission_mode()
 
         if session.config.permission_mode != current_permission_mode:
@@ -158,7 +161,9 @@ class ConnectionManager:
             # Reconnect agent with new permission mode
             await session.disconnect()
             await session.connect()
-            logger.info("✅ [WS] Agent reconnected with updated permission mode")
+            logger.info(
+                "✅ [WS] Agent reconnected with updated permission mode"
+            )
 
         # Set workspace and question_service on agent
         session.workspace = workspace
@@ -275,9 +280,7 @@ class ConnectionManager:
         """Connect agent session to SDK (single agent is already connected at startup)."""
         # Single agent is already connected at server startup
         if session._connected:
-            logger.info(
-                "✅ [WS] Agent already connected, skipping connect()"
-            )
+            logger.info("✅ [WS] Agent already connected, skipping connect()")
             await websocket.send_json(
                 {
                     "type": "status",
@@ -387,8 +390,12 @@ class ConnectionManager:
                 # Single agent mode: Agent stays connected with current workspace/question_service
                 # These will be updated when next client connects
                 # We don't clear them to avoid race conditions with in-flight messages
-                logger.info("🧹 [WS] Removing connection from active sessions...")
-                logger.info("✅ [WS] Agent staying connected (will be reused)")
+                logger.info(
+                    "🧹 [WS] Removing connection from active sessions..."
+                )
+                logger.info(
+                    "✅ [WS] Agent staying connected (will be reused)"
+                )
             except Exception as e:
                 logger.error(f"Error removing session: {e}")
             del self.active_sessions[connection_id]

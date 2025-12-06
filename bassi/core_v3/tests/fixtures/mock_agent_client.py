@@ -73,3 +73,11 @@ class MockAgentClient(AgentClient):
 
     async def get_server_info(self) -> Optional[dict[str, Any]]:
         return self.server_info
+
+    async def set_permission_mode(self, mode: str) -> None:
+        """Mock set_permission_mode - just tracks the mode."""
+        self.permission_mode = mode
+
+    async def set_model(self, model: str | None = None) -> None:
+        """Mock set_model - just tracks the model."""
+        self.model = model

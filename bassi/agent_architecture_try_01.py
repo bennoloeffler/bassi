@@ -12,7 +12,12 @@ exclusive use to avoid that problem entirely.
 
 import asyncio
 
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
 from websockets.exceptions import ConnectionClosed
 from websockets.http import Headers
 
@@ -61,7 +66,9 @@ async def main(http_port: int = 9001, ws_port: int = 9002) -> None:
         "Only one websocket allowed at a time; others receive 1013 busy.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
 
     print(
         f"[try01] HTTP http://127.0.0.1:{http_port}  | "

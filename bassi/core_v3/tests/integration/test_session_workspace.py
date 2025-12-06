@@ -60,7 +60,10 @@ class TestSessionWorkspaceInitialization:
             metadata = json.load(f)
 
         # Check for chat_id (new) or session_id (backward compat)
-        assert metadata.get("chat_id") == session_id or metadata.get("session_id") == session_id
+        assert (
+            metadata.get("chat_id") == session_id
+            or metadata.get("session_id") == session_id
+        )
         assert "display_name" in metadata
         assert "created_at" in metadata
         assert metadata["state"] == "CREATED"
@@ -410,7 +413,9 @@ class TestSessionLoading:
     def test_raises_error_if_session_not_found(self, tmp_path):
         """Should raise FileNotFoundError for non-existent session."""
         # Error message now says "Chat not found" (renamed from Session)
-        with pytest.raises(FileNotFoundError, match="(Session|Chat) not found"):
+        with pytest.raises(
+            FileNotFoundError, match="(Session|Chat) not found"
+        ):
             SessionWorkspace.load("nonexistent-session", base_path=tmp_path)
 
     def test_checks_session_existence(self, tmp_path):

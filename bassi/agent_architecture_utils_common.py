@@ -9,7 +9,7 @@ simulates the Claude Agent SDK streaming contract.
 import asyncio
 import datetime as _dt
 import textwrap
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import AsyncGenerator, Callable
 
 HtmlFactory = Callable[[], str]
 
@@ -73,7 +73,9 @@ async def start_simple_http_server(
 ) -> asyncio.AbstractServer:
     """Serve a single HTML document for all requests."""
 
-    async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    async def _handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
         try:
             await reader.readline()  # Only care that something arrived
             body = html_factory().encode()

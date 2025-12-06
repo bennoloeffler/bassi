@@ -4071,3 +4071,39 @@ details[open] .tools-grid {
         opacity: 0;
     }
 }
+
+/* ========== Permission Chips with Delete Button ========== */
+.permission-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-secondary);
+    padding: 0.3em 0.5em 0.3em 0.7em;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+}
+
+.permission-chip .tool-tag {
+    background: transparent;
+    padding: 0;
+    border: none;
+    margin: 0;
+}
+
+.permission-delete {
+    color: var(--accent-red);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: bold;
+    padding: 0 4px;
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+    line-height: 1;
+}
+
+.permission-delete:hover {
+    opacity: 1;
+    color: #ff4444;
+}

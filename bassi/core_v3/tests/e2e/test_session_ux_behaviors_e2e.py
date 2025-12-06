@@ -19,8 +19,12 @@ pytestmark = [
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="MCP chrome-devtools integration not yet implemented")
-async def test_history_md_not_in_file_list(running_server, chrome_devtools_client):
+@pytest.mark.skip(
+    reason="MCP chrome-devtools integration not yet implemented"
+)
+async def test_history_md_not_in_file_list(
+    running_server, chrome_devtools_client
+):
     """
     Test that history.md does NOT appear in session file listings.
 
@@ -58,23 +62,27 @@ async def test_history_md_not_in_file_list(running_server, chrome_devtools_clien
         input_field = None
         for element in snapshot.get("elements", []):
             role = element.get("role", "")
-            if role == "textbox" and "Type a message" in element.get("name", ""):
+            if role == "textbox" and "Type a message" in element.get(
+                "name", ""
+            ):
                 input_field = element.get("uid")
                 break
 
         assert input_field, "Could not find message input field"
 
         # Type a test message
-        await chrome_devtools_client.fill({
-            "uid": input_field,
-            "value": "test message for file listing"
-        })
+        await chrome_devtools_client.fill(
+            {"uid": input_field, "value": "test message for file listing"}
+        )
 
         # Find and click send button
         snapshot = await chrome_devtools_client.take_snapshot({})
         send_btn = None
         for element in snapshot.get("elements", []):
-            if element.get("name") == "Send" and element.get("role") == "button":
+            if (
+                element.get("name") == "Send"
+                and element.get("role") == "button"
+            ):
                 send_btn = element.get("uid")
                 break
 
@@ -83,22 +91,27 @@ async def test_history_md_not_in_file_list(running_server, chrome_devtools_clien
 
         # Wait for response to complete
         import asyncio
+
         await asyncio.sleep(5)  # Wait for agent response
 
         # Now check the file list via API
         import httpx
 
         # Get session ID from frontend
-        script_result = await chrome_devtools_client.evaluate_script({
-            "function": "() => { return window.bassiApp.sessionId; }"
-        })
+        script_result = await chrome_devtools_client.evaluate_script(
+            {"function": "() => { return window.bassiApp.sessionId; }"}
+        )
         session_id = script_result.get("result", {}).get("value")
 
         assert session_id, "Session ID not found in frontend state"
 
         # Fetch file list from API
-        response = httpx.get(f"{running_server}/api/sessions/{session_id}/files")
-        assert response.status_code == 200, f"API returned {response.status_code}"
+        response = httpx.get(
+            f"{running_server}/api/sessions/{session_id}/files"
+        )
+        assert (
+            response.status_code == 200
+        ), f"API returned {response.status_code}"
 
         files = response.json()
 
@@ -116,7 +129,9 @@ async def test_history_md_not_in_file_list(running_server, chrome_devtools_clien
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="MCP chrome-devtools integration not yet implemented")
+@pytest.mark.skip(
+    reason="MCP chrome-devtools integration not yet implemented"
+)
 async def test_no_message_duplication_on_session_switch(
     running_server, chrome_devtools_client
 ):
@@ -141,14 +156,15 @@ async def test_no_message_duplication_on_session_switch(
 
         input_uid = None
         for el in snapshot.get("elements", []):
-            if el.get("role") == "textbox" and "Type a message" in el.get("name", ""):
+            if el.get("role") == "textbox" and "Type a message" in el.get(
+                "name", ""
+            ):
                 input_uid = el.get("uid")
                 break
 
-        await chrome_devtools_client.fill({
-            "uid": input_uid,
-            "value": "test for duplication"
-        })
+        await chrome_devtools_client.fill(
+            {"uid": input_uid, "value": "test for duplication"}
+        )
 
         snapshot = await chrome_devtools_client.take_snapshot({})
         send_uid = None
@@ -161,36 +177,44 @@ async def test_no_message_duplication_on_session_switch(
 
         # Wait for response
         import asyncio
+
         await asyncio.sleep(5)
 
         # Count messages in UI (should be 1 user + 1 assistant = 2 total)
-        message_count_realtime = await chrome_devtools_client.evaluate_script({
-            "function": """() => {
+        message_count_realtime = await chrome_devtools_client.evaluate_script(
+            {
+                "function": """() => {
                 const conv = document.querySelector('.conversation');
                 return conv ? conv.children.length : 0;
             }"""
-        })
-        realtime_count = message_count_realtime.get("result", {}).get("value", 0)
-
-        assert realtime_count == 2, (
-            f"Expected 2 messages (1 user + 1 assistant), got {realtime_count}"
+            }
+        )
+        realtime_count = message_count_realtime.get("result", {}).get(
+            "value", 0
         )
 
+        assert (
+            realtime_count == 2
+        ), f"Expected 2 messages (1 user + 1 assistant), got {realtime_count}"
+
         # Get session ID
-        session_id_result = await chrome_devtools_client.evaluate_script({
-            "function": "() => { return window.bassiApp.sessionId; }"
-        })
+        session_id_result = await chrome_devtools_client.evaluate_script(
+            {"function": "() => { return window.bassiApp.sessionId; }"}
+        )
         first_session_id = session_id_result.get("result", {}).get("value")
 
         # Verify history file (via API)
         import httpx
-        response = httpx.get(f"{running_server}/api/sessions/{first_session_id}/messages")
+
+        response = httpx.get(
+            f"{running_server}/api/sessions/{first_session_id}/messages"
+        )
         assert response.status_code == 200
 
         messages_from_api = response.json().get("messages", [])
-        assert len(messages_from_api) == 2, (
-            f"Expected 2 messages in history, got {len(messages_from_api)}"
-        )
+        assert (
+            len(messages_from_api) == 2
+        ), f"Expected 2 messages in history, got {len(messages_from_api)}"
 
         # Create new session
         snapshot = await chrome_devtools_client.take_snapshot({})
@@ -215,13 +239,17 @@ async def test_no_message_duplication_on_session_switch(
         await asyncio.sleep(2)
 
         # Count messages after restoration
-        message_count_restored = await chrome_devtools_client.evaluate_script({
-            "function": """() => {
+        message_count_restored = await chrome_devtools_client.evaluate_script(
+            {
+                "function": """() => {
                 const conv = document.querySelector('.conversation');
                 return conv ? conv.children.length : 0;
             }"""
-        })
-        restored_count = message_count_restored.get("result", {}).get("value", 0)
+            }
+        )
+        restored_count = message_count_restored.get("result", {}).get(
+            "value", 0
+        )
 
         # CRITICAL: Should still be 2 messages, NOT duplicated
         assert restored_count == 2, (
@@ -230,7 +258,9 @@ async def test_no_message_duplication_on_session_switch(
         )
 
         # Also verify via API that history file wasn't duplicated
-        response2 = httpx.get(f"{running_server}/api/sessions/{first_session_id}/messages")
+        response2 = httpx.get(
+            f"{running_server}/api/sessions/{first_session_id}/messages"
+        )
         messages_after_switch = response2.json().get("messages", [])
 
         assert len(messages_after_switch) == 2, (
@@ -238,7 +268,9 @@ async def test_no_message_duplication_on_session_switch(
             f"got {len(messages_after_switch)}"
         )
 
-        print("✅ No message duplication: UI has 2 messages, history has 2 messages")
+        print(
+            "✅ No message duplication: UI has 2 messages, history has 2 messages"
+        )
 
     except Exception as e:
         pytest.fail(f"Test failed: {e}")

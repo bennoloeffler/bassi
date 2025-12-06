@@ -10,7 +10,7 @@ Tasks are defined in ~/.bassi/tasks-scheduler/ as folders containing:
 - results/: Output history (auto-generated)
 """
 
-from .task_scheduler import TaskScheduler
 from .models import Task
+from .task_scheduler import TaskScheduler
 
 __all__ = ["TaskScheduler", "Task"]

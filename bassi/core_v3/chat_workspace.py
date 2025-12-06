@@ -520,9 +520,7 @@ class ChatWorkspace:
     @property
     def display_name(self) -> str:
         """Get human-readable chat name from metadata."""
-        return self.metadata.get(
-            "display_name", f"Chat {self.chat_id[:8]}"
-        )
+        return self.metadata.get("display_name", f"Chat {self.chat_id[:8]}")
 
     def update_display_name(self, new_name: str) -> None:
         """
@@ -720,4 +718,3 @@ class ChatWorkspace:
 
 # Backward compatibility alias
 SessionWorkspace = ChatWorkspace
-

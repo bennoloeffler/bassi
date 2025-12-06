@@ -5,7 +5,7 @@ Provides endpoints for managing user settings and preferences.
 
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from bassi.core_v3.services.config_service import ConfigService
@@ -13,11 +13,13 @@ from bassi.core_v3.services.model_service import (
     MODEL_LEVELS,
     get_model_info,
 )
+from bassi.core_v3.services.permission_manager import PermissionManager
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-# Singleton instance
+# Singleton instances (set from web_server_v3.py)
 _config_service: ConfigService | None = None
+_permission_manager: PermissionManager | None = None
 
 
 def get_config_service() -> ConfigService:
@@ -26,6 +28,17 @@ def get_config_service() -> ConfigService:
     if _config_service is None:
         _config_service = ConfigService()
     return _config_service
+
+
+def set_permission_manager(pm: PermissionManager) -> None:
+    """Set the PermissionManager instance (called from web_server_v3.py)"""
+    global _permission_manager
+    _permission_manager = pm
+
+
+def get_permission_manager() -> PermissionManager | None:
+    """Get the PermissionManager instance"""
+    return _permission_manager
 
 
 class GlobalBypassRequest(BaseModel):
@@ -256,4 +269,115 @@ async def get_active_models():
         configured_model_id=configured_model.id,
         pool_agents=agent_infos,
         note=note,
+    )
+
+
+# ========== Permissions Info ==========
+
+
+class PermissionsResponse(BaseModel):
+    """Response with all active permissions"""
+
+    global_bypass: bool
+    session_permissions: list[str]
+    persistent_permissions: list[str]
+    one_time_permissions: dict[str, int]
+
+
+@router.get("/permissions", response_model=PermissionsResponse)
+async def get_permissions():
+    """Get all active permissions for display.
+
+    Returns permissions from all scopes:
+    - global_bypass: If True, all tools run without asking
+    - session_permissions: Tools allowed for current browser session
+    - persistent_permissions: Tools allowed forever (saved to config)
+    - one_time_permissions: Tools with remaining one-time uses
+
+    Note: Session and one-time permissions come from the PermissionManager
+    which is shared across all browser sessions. This endpoint shows
+    the current state of all permission types.
+    """
+    config = get_config_service()
+    pm = get_permission_manager()
+
+    # Get global bypass from config
+    global_bypass = config.get_global_bypass_permissions()
+
+    # Get persistent permissions from config
+    persistent = config.get_persistent_permissions()
+
+    # Get session/one-time from PermissionManager (if available)
+    if pm:
+        session_perms = list(pm.session_permissions.keys())
+        one_time = dict(pm.one_time_permissions)
+    else:
+        session_perms = []
+        one_time = {}
+
+    return PermissionsResponse(
+        global_bypass=global_bypass,
+        session_permissions=session_perms,
+        persistent_permissions=persistent,
+        one_time_permissions=one_time,
+    )
+
+
+class DeletePermissionResponse(BaseModel):
+    """Response after deleting a permission"""
+
+    success: bool
+    tool: str
+    scope: str
+
+
+@router.delete(
+    "/permissions/{scope}/{tool_name:path}",
+    response_model=DeletePermissionResponse,
+)
+async def delete_permission(scope: str, tool_name: str):
+    """Delete a specific tool permission.
+
+    Args:
+        scope: Permission scope - one of 'session', 'persistent', 'one_time'
+        tool_name: The tool name to remove (URL encoded if contains special chars)
+
+    Returns:
+        Success status with tool and scope info
+
+    Note:
+        Deletion takes effect immediately. The next tool call will prompt
+        for permission again. Deleting a non-existent permission succeeds
+        (idempotent operation).
+    """
+    config = get_config_service()
+    pm = get_permission_manager()
+
+    if scope == "persistent":
+        # Remove from config file
+        current = config.get_persistent_permissions()
+        if tool_name in current:
+            current.remove(tool_name)
+            config.set_persistent_permissions(current)
+
+    elif scope == "session":
+        # Remove from session memory
+        if pm:
+            pm.session_permissions.pop(tool_name, None)
+
+    elif scope == "one_time":
+        # Remove from one-time memory
+        if pm:
+            pm.one_time_permissions.pop(tool_name, None)
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scope: {scope}. Must be 'session', 'persistent', or 'one_time'",
+        )
+
+    return DeletePermissionResponse(
+        success=True,
+        tool=tool_name,
+        scope=scope,
     )

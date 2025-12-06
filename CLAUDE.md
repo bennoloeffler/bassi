@@ -90,18 +90,45 @@ is used, look at files:
 - docs/features_concepts/**
 you may find all the hints you need.
 
-## for your coding practice, there are some important rules:
+## CRITICAL RULES (MUST FOLLOW!)
+
+### 1. RUN TESTS AFTER EVERY BIGGER CHANGE
+- After implementing ANY significant code change, **RUN THE TESTS**
+- Use `uv run pytest` for quick check, or `./check.sh` for full QA
+- Do NOT wait until the end - test incrementally as you work
+- If tests fail, FIX THEM before moving on
+
+### 2. DO NOT RENAME THINGS WITHOUT GOOD REASON
+- **Keep names STABLE** - renaming breaks imports, tests, and documentation
+- If you rename something, you MUST update ALL references:
+  - All imports across the codebase
+  - All tests that use the old name
+  - All documentation mentioning it
+  - All fixtures and conftest.py files
+- When in doubt, DON'T RENAME. Stability > perfection.
+
+### 3. ALWAYS WRITE TESTS
+- Every new feature MUST have tests
+- Write tests FIRST (TDD) or immediately after implementation
+- Never leave code untested
+- Read `CLAUDE_TESTS.md` for patterns and best practices
+
+---
+
+## Coding Practice Workflow
+
 1. Start by analysing features and document the feature and update the documentation.
    Features get a name and the place to document them are here:
    `docs/features_concepts/<feature_name>.md`
 2. **Implement tests first** - Read `CLAUDE_TESTS.md` for patterns and best practices
-3. implement the feature - carefully decide to create DRY modules. In doubt, read file `CLAUDE_BBS.md` - do not over-engineer. BUT CREATE REUSABLE COMPONENTS. BBS style.
-4. You may read the current last log entries by something like:
-   file server.log # that you may read with:
-   `tail -n 300 server.log`
-5. run all tests (with `uv run pytest` or even more intense `./check.sh`)
-6. iterate on the feature until tests are running and user is satisfied
-7. if feature is implemented: update the docs
+3. Implement the feature - carefully decide to create DRY modules. In doubt, read file `CLAUDE_BBS.md` - do not over-engineer. BUT CREATE REUSABLE COMPONENTS. BBS style.
+4. **RUN TESTS** - After every significant change, run `uv run pytest` to catch issues early
+5. You may read the current last log entries:
+   - Development server: `tail -n 300 /tmp/bassi-web.log` (when running `./run-agent-web.sh`)
+   - Debug log: `tail -n 300 bassi_debug.log` (application debug output)
+6. Run all tests (with `uv run pytest` or even more intense `./check.sh`)
+7. Iterate on the feature until tests are running and user is satisfied
+8. If feature is implemented: update the docs
 
 ## Development Commands
 
@@ -154,11 +181,15 @@ uv run mypy bassi/       # Type checking
 ### Debugging
 
 ```bash
-# Read server logs
-tail -n 300 server.log
-tail -f server.log       # Follow in real-time
+# Read development server logs (when running ./run-agent-web.sh)
+tail -n 300 /tmp/bassi-web.log
+tail -f /tmp/bassi-web.log    # Follow in real-time
 
-# View debug logs
+# Read application debug log
+tail -n 300 bassi_debug.log
+tail -f bassi_debug.log       # Follow in real-time
+
+# View debug logs with verbose output
 BASSI_DEBUG=1 bassi
 
 # Check hot reload
@@ -266,6 +297,28 @@ MCP servers are launched automatically by the agent on first use.
 
 **CRITICAL: Always consult [CLAUDE_TESTS.md](CLAUDE_TESTS.md) before writing or modifying tests.**
 
+#### NEVER MIX TESTING TECHNOLOGIES (MANDATORY RULE)
+
+Each test folder uses ONE testing technology. **DO NOT MIX THEM.**
+
+| Folder | Technology | Description |
+|--------|------------|-------------|
+| `tests/unit/` | Pure Python | Fast, isolated, mock everything |
+| `tests/integration/` | **TestClient** (Starlette) | Synchronous WebSocket/HTTP testing |
+| `tests/e2e/` | **Playwright** | Real browser automation with `live_server` fixture |
+
+**STRICT RULES:**
+- **E2E folder** = Playwright ONLY (browser automation, `live_server` fixture, `@pytest.mark.e2e`)
+- **Integration folder** = TestClient ONLY (synchronous WebSocket via `with client.websocket_connect()`)
+- **NEVER** put TestClient tests in E2E folder
+- **NEVER** put Playwright tests in integration folder
+- **NEVER** use `@pytest.mark.e2e` on TestClient tests (they are NOT E2E tests!)
+
+**Why this matters:**
+- E2E tests require `live_server` fixture (real HTTP server on port 18765)
+- Integration tests use `TestClient` (in-process, no real server)
+- Mixing them causes tests to hang or fail silently
+
 This project has comprehensive testing documentation covering:
 - Test organization and structure (unit, integration, E2E)
 - Fixtures and test isolation patterns
@@ -277,8 +330,8 @@ This project has comprehensive testing documentation covering:
 
 Quick reference:
 - **Unit tests**: Fast, isolated, use MockAgentClient
-- **Integration tests**: Mark with `@pytest.mark.integration` (require API keys)
-- **E2E tests**: Mark with `@pytest.mark.e2e` + `@pytest.mark.xdist_group(name="e2e_server")`
+- **Integration tests**: Use TestClient, synchronous WebSocket testing
+- **E2E tests**: Playwright + `live_server` + `@pytest.mark.e2e` + `@pytest.mark.xdist_group(name="e2e_server")`
 - **Async tests**: Auto-detected (or use `@pytest.mark.asyncio`)
 - **Fixtures**: Automatic isolation via shared resources in `conftest.py`
 

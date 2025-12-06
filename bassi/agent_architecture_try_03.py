@@ -13,9 +13,14 @@ Behavior:
 """
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
 from websockets.exceptions import ConnectionClosed
 from websockets.http import Headers
 
@@ -96,7 +101,12 @@ class AgentPoolDemo:
             return
         self.job_counter += 1
         await worker.queue.put(
-            Job(ws=ws, prompt=prompt, job_id=self.job_counter, worker_name=worker.name)
+            Job(
+                ws=ws,
+                prompt=prompt,
+                job_id=self.job_counter,
+                worker_name=worker.name,
+            )
         )
         await ws.send(
             f"enqueued on {worker.name}; "
@@ -133,7 +143,9 @@ async def main(http_port: int = 9021, ws_port: int = 9022) -> None:
         "Pool of 2 agents; each owns its context; routing to least-loaded queue.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
 
     print(
         f"[try03] HTTP http://127.0.0.1:{http_port}  | "

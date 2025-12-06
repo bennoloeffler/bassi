@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.e2e
 @pytest.mark.xdist_group(name="e2e_server")
-@pytest.mark.skip(reason="MCP chrome-devtools integration not yet implemented")
+@pytest.mark.skip(
+    reason="MCP chrome-devtools integration not yet implemented"
+)
 async def test_session_management_full_flow(
     running_server, chrome_devtools_client
 ):
@@ -243,8 +245,7 @@ async def test_session_management_full_flow(
         and "Intentional disconnect" not in log.get("text", "")
     ]
     assert len(reconnect_logs) == 0, (
-        f"Should not have unwanted reconnections, "
-        f"found: {reconnect_logs}"
+        f"Should not have unwanted reconnections, " f"found: {reconnect_logs}"
     )
 
     # Step 12: Verify session files (history.md should exist)
@@ -265,10 +266,10 @@ async def test_session_management_full_flow(
         """
         }
     )
-    assert result[
-        "hasHistoryFile"
-    ], "Session should have history.md file"
-    logger.info(f"Session has {result['fileCount']} files including history.md")
+    assert result["hasHistoryFile"], "Session should have history.md file"
+    logger.info(
+        f"Session has {result['fileCount']} files including history.md"
+    )
 
     # Step 13: Rapid session creation test (pool handling)
     logger.info("Step 13: Test rapid session creation")
@@ -311,7 +312,9 @@ async def test_session_management_full_flow(
 
 @pytest.mark.e2e
 @pytest.mark.xdist_group(name="e2e_server")
-@pytest.mark.skip(reason="MCP chrome-devtools integration not yet implemented")
+@pytest.mark.skip(
+    reason="MCP chrome-devtools integration not yet implemented"
+)
 async def test_session_creation_no_unwanted_reconnect(
     running_server, chrome_devtools_client
 ):
@@ -360,7 +363,9 @@ async def test_session_creation_no_unwanted_reconnect(
 
     # Check console logs for unwanted reconnection
     console_logs = await client.list_console_messages({})
-    log_texts = [log.get("text", "") for log in console_logs.get("messages", [])]
+    log_texts = [
+        log.get("text", "") for log in console_logs.get("messages", [])
+    ]
 
     # Should see "Intentional disconnect" message
     intentional_disconnect = any(

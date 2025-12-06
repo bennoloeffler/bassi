@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point for bassi-web command"""
-    logger.info("🚀 BELBEL")
+
+    logger.info("-" * 50)
     logger.info("🚀 Starting Bassi Web UI V3 (Agent SDK)")
     logger.info("📁 Open http://localhost:8765 in your browser")
     logger.info("")

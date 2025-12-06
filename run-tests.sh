@@ -39,7 +39,6 @@ run_integration_tests() {
     echo -e "${YELLOW}━━━ Running Integration Tests ━━━${NC}"
     echo "Location: bassi/core_v3/tests/integration/"
     echo "Parallel: Yes (-n auto)"
-    echo "Note: E2E tests are in separate e2e/ folder"
     echo ""
     uv run pytest bassi/core_v3/tests/integration/ -n auto "$@"
     echo -e "${GREEN}✓ Integration tests passed${NC}\n"

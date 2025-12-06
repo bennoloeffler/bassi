@@ -67,13 +67,17 @@ Generate ONLY the session name (no quotes, no explanation, just the kebab-case n
         self.config = config or Config()
 
         # Get API key from config or environment
-        api_key = self.config.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+        api_key = self.config.anthropic_api_key or os.getenv(
+            "ANTHROPIC_API_KEY"
+        )
 
         # Only create client if API key is available (test environments may not have one)
         try:
             if api_key:
                 self.client = Anthropic(api_key=api_key)
-                logger.debug("✅ SessionNamingService initialized with API key")
+                logger.debug(
+                    "✅ SessionNamingService initialized with API key"
+                )
             else:
                 self.client = None
                 logger.warning(

@@ -243,7 +243,9 @@ class ChatIndex:
         filter_state: Optional[ChatState] = None,
     ) -> list[dict]:
         """Backward compatibility: list_sessions -> list_chats."""
-        return self.list_chats(limit, offset, sort_by, sort_desc, filter_state)
+        return self.list_chats(
+            limit, offset, sort_by, sort_desc, filter_state
+        )
 
     def search_chats(self, query: str) -> list[dict]:
         """
@@ -391,4 +393,3 @@ class ChatIndex:
 
 # Backward compatibility alias
 SessionIndex = ChatIndex
-

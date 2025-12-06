@@ -8,17 +8,20 @@ session_id, streams back text blocks, then disconnects.
 """
 
 import asyncio
-import os
 import uuid
 from dataclasses import dataclass
-
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
-from websockets.exceptions import ConnectionClosed
-from websockets.http import Headers
 
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.client import ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
+from websockets.exceptions import ConnectionClosed
+from websockets.http import Headers
 
 from bassi.agent_architecture_utils_common import (
     basic_html,
@@ -49,7 +52,9 @@ class QueueServer:
             await ws.send("server busy: queue full")
             return
         self.job_counter += 1
-        await self.queue.put(Job(ws=ws, prompt=prompt, job_id=self.job_counter))
+        await self.queue.put(
+            Job(ws=ws, prompt=prompt, job_id=self.job_counter)
+        )
 
     async def _worker(self) -> None:
         while True:
@@ -73,7 +78,9 @@ class QueueServer:
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             try:
-                                await job.ws.send(f"[job {job.job_id}] {block.text}")
+                                await job.ws.send(
+                                    f"[job {job.job_id}] {block.text}"
+                                )
                             except Exception:
                                 return
                 if isinstance(msg, ResultMessage):
@@ -114,7 +121,9 @@ async def main(http_port: int = 9311, ws_port: int = 9312) -> None:
         "Multiple clients accepted; each job uses a new ClaudeSDKClient with claude-haiku-4-5-20251001.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
     print(
         f"[try02-sdk] HTTP http://127.0.0.1:{http_port} | "
         f"WS ws://127.0.0.1:{ws_port}/ws"

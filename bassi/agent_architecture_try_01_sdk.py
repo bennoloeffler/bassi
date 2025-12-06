@@ -8,16 +8,19 @@ disposed on disconnect. Only one connection is allowed at a time; others get a
 """
 
 import asyncio
-import os
 import uuid
-
-from websockets.asyncio.server import Request, Response, ServerConnection, serve
-from websockets.exceptions import ConnectionClosed
-from websockets.http import Headers
 
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.client import ClaudeSDKClient
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
+from websockets.asyncio.server import (
+    Request,
+    Response,
+    ServerConnection,
+    serve,
+)
+from websockets.exceptions import ConnectionClosed
+from websockets.http import Headers
 
 from bassi.agent_architecture_utils_common import (
     basic_html,
@@ -74,7 +77,9 @@ async def main(http_port: int = 9301, ws_port: int = 9302) -> None:
         "Uses claude-haiku-4-5-20251001. One connection at a time; new client per session.",
     )
     http_server = await start_simple_http_server(http_port, lambda: html)
-    ws_server = await serve(handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws)
+    ws_server = await serve(
+        handle_ws, "127.0.0.1", ws_port, process_request=_reject_non_ws
+    )
     print(
         f"[try01-sdk] HTTP http://127.0.0.1:{http_port} | "
         f"WS ws://127.0.0.1:{ws_port}/ws"

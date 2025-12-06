@@ -705,6 +705,17 @@ class BassiWebClient {
     }
 
     async updateModelLevel(level) {
+        // Guard: Block model changes while agent is working
+        if (this.isAgentWorking) {
+            this.showNotification('Cannot change model while agent is working', 'warning')
+            // Revert radio button to current level
+            if (this.currentModelLevel) {
+                const radioBtn = document.querySelector(`input[name="model-level"][value="${this.currentModelLevel}"]`)
+                if (radioBtn) radioBtn.checked = true
+            }
+            return
+        }
+
         // Update model level on backend
         try {
             const response = await fetch('/api/settings/model', {
@@ -748,6 +759,15 @@ class BassiWebClient {
     }
 
     async updateAutoEscalate(enabled) {
+        // Guard: Block auto-escalate changes while agent is working
+        if (this.isAgentWorking) {
+            this.showNotification('Cannot change auto-escalate while agent is working', 'warning')
+            // Revert toggle
+            const toggle = document.getElementById('auto-escalate-toggle')
+            if (toggle) toggle.checked = !enabled
+            return
+        }
+
         // Update auto-escalate setting on backend
         try {
             const response = await fetch('/api/settings/model', {
@@ -886,6 +906,7 @@ class BassiWebClient {
             { type: 'builtin', name: '/skills', description: 'Show all available skills' },
             { type: 'builtin', name: '/commands', description: 'Show all available commands' },
             { type: 'builtin', name: '/tools', description: 'Show all MCP tools' },
+            { type: 'builtin', name: '/permissions', description: 'Show active tool permissions' },
             { type: 'builtin', name: '/clear', description: 'Clear conversation UI' }
         ]
 
@@ -1245,6 +1266,14 @@ class BassiWebClient {
         if (lowerContent === '/clear') {
             this.addUserMessage(content)
             this.clearConversation()
+            this.messageInput.value = ''
+            this.messageInput.style.height = 'auto'
+            return
+        }
+
+        if (lowerContent === '/permissions') {
+            this.addUserMessage(content)
+            this.showPermissions()
             this.messageInput.value = ''
             this.messageInput.style.height = 'auto'
             return
@@ -2301,8 +2330,7 @@ class BassiWebClient {
 
                 <div class="welcome-content">
                     <p class="welcome-description">
-                        Powered by <strong>Claude Sonnet 4.5</strong>, I can help you with
-                        software development, database operations, document processing, and more.
+                        Powered by <strong>Claude</strong>, I can do almost everything on your computer, the web and office 365.
                     </p>
 
                     <div class="welcome-quick-start">
@@ -2316,7 +2344,7 @@ class BassiWebClient {
                         </div>
                         <div class="quick-start-item">
                             <span class="qs-icon">⚙️</span>
-                            <span class="qs-text">Connected to MCP servers</span>
+                            <span class="qs-text">Driven by MCP servers</span>
                         </div>
                     </div>
                 </div>
@@ -2793,6 +2821,168 @@ class BassiWebClient {
         el.innerHTML = html
         this.conversationEl.appendChild(el)
         this.scrollToBottom()
+    }
+
+    async showPermissions() {
+        // Show loading indicator
+        const loadingMsg = this.addSystemMessage('⏳ Loading permissions...', true)
+
+        try {
+            const response = await fetch('/api/settings/permissions')
+            const data = await response.json()
+
+            this.removeTemporaryMessages()
+
+            if (!response.ok) {
+                this.addSystemMessage('Could not load permissions.')
+                return
+            }
+
+            let html
+
+            if (data.global_bypass) {
+                // Case 1: Global bypass enabled - no restrictions
+                html = `
+                    <div class="message-header">
+                        <span class="assistant-icon">🔓</span>
+                        <span class="assistant-name">Permissions</span>
+                    </div>
+                    <div class="message-content">
+                        <div class="help-content">
+                            <h2>🔓 PERMISSIONS: NO RESTRICTIONS</h2>
+
+                            <div class="help-section">
+                                <p>Global bypass is <strong>ENABLED</strong> - all tools run without asking.</p>
+                                <p style="color: var(--text-secondary); margin-top: 1em;">
+                                    To enable permission checks, toggle the "brain" icon in the UI
+                                    or disable global bypass in settings.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `
+            } else {
+                // Case 2/3: Permission checks active
+                const sessionPerms = data.session_permissions || []
+                const persistentPerms = data.persistent_permissions || []
+                const oneTimePerms = data.one_time_permissions || {}
+
+                const hasAnyPermissions = sessionPerms.length > 0 ||
+                                         persistentPerms.length > 0 ||
+                                         Object.keys(oneTimePerms).length > 0
+
+                let permissionsHtml
+
+                if (hasAnyPermissions) {
+                    // Case 2: Has some permissions
+                    let sectionsHtml = ''
+
+                    if (sessionPerms.length > 0) {
+                        sectionsHtml += `
+                            <div class="help-section">
+                                <h3>📍 THIS SESSION ONLY <span style="color: var(--text-secondary); font-weight: normal;">(cleared on disconnect)</span></h3>
+                                <div class="tools-grid">
+                                    ${sessionPerms.map(t => `<span class="permission-chip"><code class="tool-tag">${t}</code><button class="permission-delete" onclick="window.bassiClient.deletePermission('session', '${t}')" title="Remove this permission">×</button></span>`).join('')}
+                                </div>
+                            </div>
+                        `
+                    }
+
+                    if (persistentPerms.length > 0) {
+                        sectionsHtml += `
+                            <div class="help-section">
+                                <h3>💾 ALL SESSIONS <span style="color: var(--text-secondary); font-weight: normal;">(persistent, saved to config)</span></h3>
+                                <div class="tools-grid">
+                                    ${persistentPerms.map(t => `<span class="permission-chip"><code class="tool-tag">${t}</code><button class="permission-delete" onclick="window.bassiClient.deletePermission('persistent', '${t}')" title="Remove this permission">×</button></span>`).join('')}
+                                </div>
+                            </div>
+                        `
+                    }
+
+                    if (Object.keys(oneTimePerms).length > 0) {
+                        sectionsHtml += `
+                            <div class="help-section">
+                                <h3>⏱️ ONE-TIME <span style="color: var(--text-secondary); font-weight: normal;">(pending, will be consumed on next use)</span></h3>
+                                <div class="tools-grid">
+                                    ${Object.entries(oneTimePerms).map(([t, count]) =>
+                                        `<span class="permission-chip"><code class="tool-tag">${t} (${count} use${count > 1 ? 's' : ''} remaining)</code><button class="permission-delete" onclick="window.bassiClient.deletePermission('one_time', '${t}')" title="Remove this permission">×</button></span>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        `
+                    }
+
+                    sectionsHtml += `
+                        <p style="color: var(--text-secondary); margin-top: 1.5em; font-style: italic;">
+                            Any tool NOT listed above will prompt for permission.
+                        </p>
+                    `
+
+                    permissionsHtml = sectionsHtml
+                } else {
+                    // Case 3: No specific permissions (clean state)
+                    permissionsHtml = `
+                        <div class="help-section">
+                            <p>No specific tool permissions granted yet.</p>
+                            <p>Each tool use will prompt for your approval.</p>
+
+                            <div style="margin-top: 1.5em; padding: 1em; background: var(--bg-secondary); border-radius: 8px;">
+                                <strong>Permission options when prompted:</strong>
+                                <ul style="margin: 0.5em 0 0 1.5em; padding: 0;">
+                                    <li><strong>One-time:</strong> Allow just this invocation</li>
+                                    <li><strong>Session:</strong> Allow for this browser session</li>
+                                    <li><strong>Persistent:</strong> Allow forever (saved to config)</li>
+                                    <li><strong>Global:</strong> Disable all permission checks</li>
+                                </ul>
+                            </div>
+                        </div>
+                    `
+                }
+
+                html = `
+                    <div class="message-header">
+                        <span class="assistant-icon">🔐</span>
+                        <span class="assistant-name">Permissions</span>
+                    </div>
+                    <div class="message-content">
+                        <div class="help-content">
+                            <h2>🔐 PERMISSIONS: ACTIVE</h2>
+                            <p style="color: var(--text-secondary); margin-bottom: 1em;">
+                                Global bypass: <strong>OFF</strong> (tools require permission)
+                            </p>
+                            ${permissionsHtml}
+                        </div>
+                    </div>
+                `
+            }
+
+            const el = document.createElement('div')
+            el.className = 'assistant-message message-fade-in'
+            el.innerHTML = html
+            this.conversationEl.appendChild(el)
+            this.scrollToBottom()
+        } catch (error) {
+            this.removeTemporaryMessages()
+            this.addSystemMessage(`Error loading permissions: ${error.message}`)
+        }
+    }
+
+    async deletePermission(scope, toolName) {
+        try {
+            const response = await fetch(
+                `/api/settings/permissions/${scope}/${encodeURIComponent(toolName)}`,
+                { method: 'DELETE' }
+            )
+            if (response.ok) {
+                // Refresh the permissions display
+                this.showPermissions()
+            } else {
+                const data = await response.json()
+                this.addSystemMessage(`Failed to remove permission: ${data.detail || toolName}`)
+            }
+        } catch (error) {
+            this.addSystemMessage(`Error removing permission: ${error.message}`)
+        }
     }
 
     clearConversation() {
@@ -4270,6 +4460,13 @@ class BassiWebClient {
          * Shows warning if user has unsent input to prevent accidental data loss.
          */
         console.log(`🔷 [FRONTEND] switchSession() called with sessionId: ${sessionId}`)
+
+        // Guard: Block session switch while agent is working
+        if (this.isAgentWorking) {
+            this.showNotification('Cannot switch session while agent is working', 'warning')
+            return
+        }
+
         if (sessionId === this.sessionId) {
             console.log('⚠️ Already in this session')
             return

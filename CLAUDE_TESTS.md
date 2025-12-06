@@ -1172,6 +1172,215 @@ uv run pytest -n auto -m "not e2e"
 
 ---
 
+## TestClient + Agent Pool Integration Pattern
+
+### The Problem
+
+When testing `WebUIServerV3` with Starlette's `TestClient`, the Agent Pool never starts because `TestClient` **does not fire FastAPI startup events** (`@app.on_event("startup")`). Tests hang forever waiting for an agent from the pool.
+
+### The Solution: `web_server_with_pool` Fixture
+
+The `web_server_with_pool` fixture in `bassi/core_v3/tests/integration/conftest.py` solves this by:
+
+1. Manually starting the agent pool before creating the TestClient
+2. Using `ThreadPoolExecutor` + `asyncio.run()` to avoid event loop conflicts with pytest-asyncio
+3. Properly cleaning up and resetting the pool singleton between tests
+
+### When to Use This Pattern
+
+Use `web_server_with_pool` when your integration test needs to:
+- Inject a custom `session_factory` with mock behaviors
+- Test specific session behaviors (failing interrupt, custom query responses)
+- Test WebSocket flows with modified agent behavior
+
+### Pattern: Custom Session Factory
+
+```python
+# 1. Define tracking variable at module level (for cross-function access)
+_my_tracking_var = False
+
+# 2. Define factory function at module level (not inside test)
+def _my_custom_factory(
+    question_service: InteractiveQuestionService,
+    workspace: SessionWorkspace,
+):
+    """Factory that creates session with custom behavior for testing."""
+    global _my_tracking_var
+    _my_tracking_var = False  # Reset for this test
+
+    session = BassiAgentSession(
+        SessionConfig(permission_mode="bypassPermissions"),
+        client_factory=_mock_client_factory,
+    )
+    session.workspace = workspace
+
+    # Mock specific method
+    async def custom_interrupt():
+        global _my_tracking_var
+        _my_tracking_var = True
+
+    session.interrupt = custom_interrupt
+    return session
+
+
+# 3. Use pytest.mark.parametrize with indirect=True
+@pytest.mark.parametrize(
+    "web_server_with_pool", [_my_custom_factory], indirect=True
+)
+def test_my_feature(web_server_with_pool):
+    """
+    Test description.
+
+    Uses web_server_with_pool fixture to solve TestClient + Agent Pool integration.
+    """
+    global _my_tracking_var
+
+    with TestClient(web_server_with_pool.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            # Skip connection messages
+            skip_connection_messages(ws)
+
+            # Perform test actions
+            ws.send_json({"type": "interrupt"})
+
+            # Verify response
+            response = ws.receive_json()
+            assert response["type"] == "interrupted"
+
+            # Verify tracking variable
+            assert _my_tracking_var, "Custom interrupt should have been called"
+```
+
+### Key Rules
+
+1. **Factory must be defined at module level** (not inside the test function) because pytest's parametrize evaluates parameters before the test runs.
+
+2. **Use global variables for cross-function tracking** since the factory runs in a different context than the test.
+
+3. **Reset tracking variables in the factory** to avoid pollution between tests.
+
+4. **Always include `client_factory=_mock_client_factory`** to avoid real API calls.
+
+5. **The fixture handles pool lifecycle** - you don't need to start/stop the pool manually.
+
+### Example: Testing Failing Interrupt
+
+```python
+# Factory for failing interrupt
+def _failing_interrupt_factory(
+    question_service: InteractiveQuestionService,
+    workspace: SessionWorkspace,
+):
+    session = BassiAgentSession(
+        SessionConfig(permission_mode="bypassPermissions"),
+        client_factory=_mock_client_factory,
+    )
+    session.workspace = workspace
+
+    async def failing_interrupt():
+        raise RuntimeError("Interrupt failed")
+
+    session.interrupt = failing_interrupt
+    return session
+
+
+@pytest.mark.parametrize(
+    "web_server_with_pool", [_failing_interrupt_factory], indirect=True
+)
+def test_interrupt_failure_handling(web_server_with_pool):
+    """Test interrupt failure handling via WebSocket E2E."""
+    with TestClient(web_server_with_pool.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            skip_connection_messages(ws)
+            ws.send_json({"type": "interrupt"})
+
+            error_response = ws.receive_json()
+            assert error_response["type"] == "error"
+            assert "Failed to interrupt" in error_response["message"]
+```
+
+### Example: Testing Query with Tracking
+
+```python
+_captured_session_ids = []
+
+def _recording_query_factory(
+    question_service: InteractiveQuestionService,
+    workspace: SessionWorkspace,
+):
+    global _captured_session_ids
+    _captured_session_ids = []
+
+    session = BassiAgentSession(
+        SessionConfig(permission_mode="bypassPermissions"),
+        client_factory=_mock_client_factory,
+    )
+    session.workspace = workspace
+
+    async def recording_query(prompt=None, **kwargs):
+        global _captured_session_ids
+        _captured_session_ids.append(kwargs.get("session_id"))
+        yield AssistantMessage(
+            content=[TextBlock(text="Response")], model="test-model"
+        )
+
+    session.query = recording_query
+    return session
+
+
+@pytest.mark.parametrize(
+    "web_server_with_pool", [_recording_query_factory], indirect=True
+)
+def test_session_id_passed_correctly(web_server_with_pool):
+    global _captured_session_ids
+
+    with TestClient(web_server_with_pool.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            session_id = skip_connection_messages(ws)
+            ws.send_json({"type": "user_message", "content": "Hello"})
+
+            # Drain messages
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg.get("type") == "message_complete":
+                    break
+
+    assert _captured_session_ids == [session_id]
+```
+
+### MockAgentClient Requirements
+
+When using `web_server_with_pool`, ensure `MockAgentClient` has all required methods:
+
+```python
+# In mock_agent_client.py - these methods are called during connection setup
+async def set_permission_mode(self, mode: str) -> None:
+    """Mock set_permission_mode - just tracks the mode."""
+    self.permission_mode = mode
+
+async def set_model(self, model: str | None = None) -> None:
+    """Mock set_model - just tracks the model."""
+    self.model = model
+```
+
+### Troubleshooting
+
+**"Test hangs forever"**
+- The fixture timeout is 10 seconds. If pool startup hangs, check:
+  - Session factory creates valid session
+  - `_mock_client_factory` returns `MockAgentClient`
+  - No infinite loops in custom methods
+
+**"Pool startup timed out after 10 seconds"**
+- The session factory is blocking or raising exceptions
+- Check logs for errors in factory
+
+**"'MockAgentClient' object has no attribute 'X'"**
+- Add the missing method to `MockAgentClient` in `tests/fixtures/mock_agent_client.py`
+- Common missing methods: `set_permission_mode`, `set_model`
+
+---
+
 ## Summary Checklist
 
 Before committing tests:

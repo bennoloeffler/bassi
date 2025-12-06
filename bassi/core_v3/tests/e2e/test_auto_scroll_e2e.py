@@ -25,19 +25,25 @@ def test_auto_scroll_on_agent_response(page: Page, live_server: str):
     page.goto(live_server)
 
     # Wait for welcome message
-    expect(page.locator('.welcome-message')).to_be_visible(timeout=10000)
+    expect(page.locator(".welcome-message")).to_be_visible(timeout=10000)
 
     # Get initial scroll position - should be at bottom after welcome message loads
-    initial_scroll = page.evaluate("""
+    initial_scroll = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
+    """
+    )
 
     # Get page height
-    initial_height = page.evaluate("""
+    initial_height = page.evaluate(
+        """
         () => document.documentElement.scrollHeight
-    """)
+    """
+    )
 
-    print(f"Initial scroll: {initial_scroll}, Initial height: {initial_height}")
+    print(
+        f"Initial scroll: {initial_scroll}, Initial height: {initial_height}"
+    )
 
     # Verify we're at the bottom (within 100px threshold)
     viewport_height = page.evaluate("() => window.innerHeight")
@@ -45,30 +51,32 @@ def test_auto_scroll_on_agent_response(page: Page, live_server: str):
     print(f"Distance from bottom: {distance_from_bottom}px (should be < 100)")
 
     # Send a message that will generate a multi-paragraph response
-    message_input = page.locator('#message-input')
+    message_input = page.locator("#message-input")
     message_input.click()
     message_input.fill("was ist ein Stofftier?")
 
     # Click send button
-    send_button = page.locator('button:has-text("Send")')
+    send_button = page.locator('#send-button')
     send_button.click()
 
     # Wait for user message to appear
-    user_message = page.locator('.user-message').last
+    user_message = page.locator(".user-message").last
     expect(user_message).to_be_visible(timeout=5000)
 
     # Get scroll position after user message
-    user_msg_scroll = page.evaluate("""
+    user_msg_scroll = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
+    """
+    )
     print(f"Scroll after user message: {user_msg_scroll}")
 
     # Wait for assistant message to start appearing
-    assistant_message = page.locator('.assistant-message').last
+    assistant_message = page.locator(".assistant-message").last
     expect(assistant_message).to_be_visible(timeout=10000)
 
     # Wait for text to start streaming (first text block should appear)
-    text_block = assistant_message.locator('.text-block').first
+    text_block = assistant_message.locator(".text-block").first
     expect(text_block).to_be_visible(timeout=5000)
 
     # Wait a bit for some text to accumulate and scroll to happen
@@ -76,15 +84,19 @@ def test_auto_scroll_on_agent_response(page: Page, live_server: str):
     page.wait_for_timeout(2500)
 
     # Check scroll position after initial text appears
-    text_scroll = page.evaluate("""
+    text_scroll = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
-    page_height = page.evaluate("""
+    """
+    )
+    page_height = page.evaluate(
+        """
         () => document.documentElement.scrollHeight
-    """)
+    """
+    )
     viewport = page.evaluate("() => window.innerHeight")
 
-    print(f"After text starts streaming:")
+    print("After text starts streaming:")
     print(f"  Scroll position: {text_scroll}")
     print(f"  Page height: {page_height}")
     print(f"  Viewport height: {viewport}")
@@ -100,16 +112,20 @@ def test_auto_scroll_on_agent_response(page: Page, live_server: str):
     )
 
     # Wait for message to complete (typing indicator disappears)
-    typing_indicator = assistant_message.locator('.typing-indicator')
+    typing_indicator = assistant_message.locator(".typing-indicator")
     expect(typing_indicator).not_to_be_visible(timeout=30000)
 
     # Get final scroll position
-    final_scroll = page.evaluate("""
+    final_scroll = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
-    final_height = page.evaluate("""
+    """
+    )
+    final_height = page.evaluate(
+        """
         () => document.documentElement.scrollHeight
-    """)
+    """
+    )
 
     print(f"Final scroll: {final_scroll}, Final height: {final_height}")
 
@@ -137,18 +153,18 @@ def test_auto_scroll_respects_user_scroll_up(page: Page, live_server: str):
     page.goto(live_server)
 
     # Wait for welcome message
-    expect(page.locator('.welcome-message')).to_be_visible(timeout=10000)
+    expect(page.locator(".welcome-message")).to_be_visible(timeout=10000)
 
     # Send a message
-    message_input = page.locator('#message-input')
+    message_input = page.locator("#message-input")
     message_input.click()
     message_input.fill("tell me a long story about a teddy bear")
 
-    send_button = page.locator('button:has-text("Send")')
+    send_button = page.locator('#send-button')
     send_button.click()
 
     # Wait for response to start
-    assistant_message = page.locator('.assistant-message').last
+    assistant_message = page.locator(".assistant-message").last
     expect(assistant_message).to_be_visible(timeout=10000)
 
     # Wait for some text to appear
@@ -161,11 +177,15 @@ def test_auto_scroll_respects_user_scroll_up(page: Page, live_server: str):
     page.wait_for_timeout(2000)
 
     # Check scroll position - should still be at top
-    current_scroll = page.evaluate("""
+    current_scroll = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
+    """
+    )
 
-    print(f"Scroll position after manually scrolling to top: {current_scroll}")
+    print(
+        f"Scroll position after manually scrolling to top: {current_scroll}"
+    )
 
     # ASSERTION: Should still be near the top (< 200px to allow for small movements)
     assert current_scroll < 200, (
@@ -187,7 +207,7 @@ def test_auto_scroll_on_new_session(page: Page, live_server: str):
     page.goto(live_server)
 
     # Wait for welcome message
-    welcome = page.locator('.welcome-message')
+    welcome = page.locator(".welcome-message")
     expect(welcome).to_be_visible(timeout=10000)
 
     # Give it time for layout to stabilize and scroll to complete
@@ -195,17 +215,21 @@ def test_auto_scroll_on_new_session(page: Page, live_server: str):
     page.wait_for_timeout(500)
 
     # Get scroll metrics
-    scroll_pos = page.evaluate("""
+    scroll_pos = page.evaluate(
+        """
         () => window.pageYOffset || document.documentElement.scrollTop
-    """)
-    page_height = page.evaluate("""
+    """
+    )
+    page_height = page.evaluate(
+        """
         () => document.documentElement.scrollHeight
-    """)
+    """
+    )
     viewport_height = page.evaluate("() => window.innerHeight")
 
     distance_from_bottom = page_height - scroll_pos - viewport_height
 
-    print(f"New session scroll:")
+    print("New session scroll:")
     print(f"  Scroll position: {scroll_pos}")
     print(f"  Page height: {page_height}")
     print(f"  Viewport: {viewport_height}")

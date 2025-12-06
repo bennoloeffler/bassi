@@ -11,10 +11,10 @@ Tests:
 
 import asyncio
 import json
-from pathlib import Path
 import sys
-import websockets
+
 import requests
+import websockets
 
 BASE_URL = "http://localhost:8765"
 WS_URL = "ws://localhost:8765/ws"
@@ -31,8 +31,8 @@ def test_health_endpoint():
     print(f"  Active sessions: {health['active_sessions']}")
     print(f"  Single agent connected: {health['single_agent_connected']}")
 
-    assert health['status'] == 'healthy', "Server not healthy"
-    assert health['single_agent_connected'], "Single agent not connected"
+    assert health["status"] == "healthy", "Server not healthy"
+    assert health["single_agent_connected"], "Single agent not connected"
     print("✅ Health check passed")
 
 
@@ -47,14 +47,16 @@ async def test_websocket_connection():
         print(f"  Received: {event['type']}")
 
         # May receive status messages first
-        while event['type'] == 'status':
+        while event["type"] == "status":
             print(f"    Status: {event['message']}")
             msg = await websocket.recv()
             event = json.loads(msg)
             print(f"  Received: {event['type']}")
 
-        assert event['type'] == 'connected', f"Expected 'connected', got {event['type']}"
-        session_id = event['session_id']
+        assert (
+            event["type"] == "connected"
+        ), f"Expected 'connected', got {event['type']}"
+        session_id = event["session_id"]
         print(f"  ✅ Connected with session: {session_id[:8]}...")
 
         return session_id
@@ -66,28 +68,29 @@ async def test_permission_toggle():
 
     # Get current setting
     response = requests.get(f"{BASE_URL}/api/settings/global-bypass")
-    initial_state = response.json()['enabled']
+    initial_state = response.json()["enabled"]
     print(f"  Initial state: {initial_state}")
 
     # Toggle it
     new_state = not initial_state
     response = requests.post(
-        f"{BASE_URL}/api/settings/global-bypass",
-        json={"enabled": new_state}
+        f"{BASE_URL}/api/settings/global-bypass", json={"enabled": new_state}
     )
-    assert response.status_code == 200, f"Got status {response.status_code}: {response.text}"
+    assert (
+        response.status_code == 200
+    ), f"Got status {response.status_code}: {response.text}"
     print(f"  Toggled to: {new_state}")
 
     # Verify it changed
     response = requests.get(f"{BASE_URL}/api/settings/global-bypass")
-    current_state = response.json()['enabled']
+    current_state = response.json()["enabled"]
     assert current_state == new_state
-    print(f"  ✅ Permission toggle works")
+    print("  ✅ Permission toggle works")
 
     # Reset to initial state
     requests.post(
         f"{BASE_URL}/api/settings/global-bypass",
-        json={"enabled": initial_state}
+        json={"enabled": initial_state},
     )
 
 
@@ -103,8 +106,8 @@ async def test_multiple_clients():
     while True:
         msg = await ws1.recv()
         event = json.loads(msg)
-        if event['type'] == 'connected':
-            session1 = event['session_id']
+        if event["type"] == "connected":
+            session1 = event["session_id"]
             print(f"    Client 1 connected: {session1[:8]}...")
             break
 
@@ -118,9 +121,9 @@ async def test_multiple_clients():
         event = json.loads(msg)
         print(f"    Client 1 received: {event['type']}")
 
-        if event['type'] == 'error':
+        if event["type"] == "error":
             print(f"      Message: {event['message']}")
-            assert 'New client connected' in event['message']
+            assert "New client connected" in event["message"]
             print("  ✅ First client notified of disconnect")
     except asyncio.TimeoutError:
         print("  ⚠️  Client 1 didn't receive disconnect message")
@@ -129,8 +132,8 @@ async def test_multiple_clients():
     while True:
         msg = await ws2.recv()
         event = json.loads(msg)
-        if event['type'] == 'connected':
-            session2 = event['session_id']
+        if event["type"] == "connected":
+            session2 = event["session_id"]
             print(f"    Client 2 connected: {session2[:8]}...")
             break
 
@@ -165,6 +168,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

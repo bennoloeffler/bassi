@@ -11,7 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "tavily-python>=0.7.12",
     "mcp>=1.18.0",
-    "claude-agent-sdk==0.1.6",
+    "claude-agent-sdk>=0.1.10",
     "prompt-toolkit>=3.0.52",
     "msgraph-sdk>=1.46.0",
     "azure-identity>=1.25.1",

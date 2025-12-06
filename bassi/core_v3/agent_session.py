@@ -41,8 +41,8 @@ class SessionConfig:
         None  # "default", "acceptEdits", "plan", "bypassPermissions"
     )
 
-    # Model configuration
-    model_id: str = "claude-sonnet-4-5-20250929"
+    # Model configuration (default to cheapest model - Haiku level 1)
+    model_id: str = "claude-haiku-4-5-20251001"
     thinking_mode: bool = (
         False  # Enable extended thinking via thinking parameter (not model suffix)
     )
@@ -383,27 +383,35 @@ class BassiAgentSession:
                 f"✅ [SESSION] Reconnected with model: {self.get_model_id()}"
             )
 
-    async def _create_multimodal_message(
-        self, content_blocks: list[dict], session_id: str
+    async def _create_streaming_prompt(
+        self, prompt: str | list[dict], session_id: str
     ):
         """
-        Create an async generator for multimodal content.
+        Create an async generator for prompts (streaming mode).
 
-        The Agent SDK expects an AsyncIterable of message dictionaries in Anthropic API format.
+        CRITICAL: The Agent SDK requires AsyncIterable format for the can_use_tool
+        callback to work. Passing a plain string bypasses the callback entirely.
+        This method ensures ALL prompts use streaming format.
 
         Args:
-            content_blocks: List of content block dictionaries (Anthropic API format)
+            prompt: User prompt (string or list of content blocks for multimodal)
             session_id: Session identifier
 
         Yields:
             Message dictionary in Agent SDK control protocol format
         """
-        # Create a single message with multimodal content
+        # Convert string prompt to content blocks
+        if isinstance(prompt, str):
+            content = [{"type": "text", "text": prompt}]
+        else:
+            content = prompt
+
+        # Create message in streaming format
         message = {
             "type": "user",
             "message": {
                 "role": "user",
-                "content": content_blocks,  # Pass content blocks directly (Anthropic API format)
+                "content": content,
             },
             "parent_tool_use_id": None,
             "session_id": session_id,
@@ -440,8 +448,16 @@ class BassiAgentSession:
                 ...
             ```
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         if not self._connected:
             await self.connect()
+
+        # Log current model before every query
+        current_model = self.get_model_id()
+        logger.info(f"🤖 [QUERY] Using model: {current_model}")
 
         # Inject conversation context if we resumed a chat
         # This gives the agent context about previous messages since SDK session may not persist
@@ -467,15 +483,12 @@ class BassiAgentSession:
             # Clear context after first use (don't repeat in subsequent queries)
             self._conversation_context = None
 
-        # Handle multimodal vs text-only
-        if isinstance(prompt, list):
-            # Multimodal: Create async generator with message dictionary
-            sdk_prompt = self._create_multimodal_message(prompt, session_id)
-        else:
-            # Text-only: Pass string directly
-            sdk_prompt = prompt
+        # CRITICAL: Always use streaming format (AsyncIterable) for prompts!
+        # The SDK only calls can_use_tool callback when prompts are AsyncIterable.
+        # Passing a plain string bypasses the callback entirely.
+        sdk_prompt = self._create_streaming_prompt(prompt, session_id)
 
-        # Send query (Agent SDK handles both string and AsyncIterable[dict])
+        # Send query in streaming mode
         await self.client.query(sdk_prompt, session_id=session_id)
 
         # Track in history
@@ -544,9 +557,11 @@ class BassiAgentSession:
             logger.warning("⚠️ Cannot set model: not connected")
             return
 
-        logger.info(f"🤖 [SESSION] Changing model to: {model_id}")
+        old_model = self.config.model_id
+        logger.info(f"🔄 [SESSION] Changing model: {old_model} → {model_id}")
         await self.client.set_model(model_id)
         self.config.model_id = model_id
+        logger.info(f"✅ [SESSION] Model changed successfully: {model_id}")
 
     async def get_server_info(self) -> dict[str, Any] | None:
         """

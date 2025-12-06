@@ -32,18 +32,18 @@ from bassi.core_v3.routes import (
     file_routes,
     settings,
 )
-from bassi.core_v3.services.agent_pool import AgentPool, get_agent_pool
+from bassi.core_v3.services.agent_pool import get_agent_pool
 from bassi.core_v3.services.capability_service import CapabilityService
 from bassi.core_v3.services.config_service import ConfigService
 from bassi.core_v3.services.permission_manager import PermissionManager
-from bassi.core_v3.upload_service import UploadService
-from bassi.core_v3.websocket.browser_session_manager import (
-    BrowserSessionManager,
-)
 
 # Backward compatibility imports
 from bassi.core_v3.session_index import SessionIndex  # noqa: F401
 from bassi.core_v3.session_workspace import SessionWorkspace  # noqa: F401
+from bassi.core_v3.upload_service import UploadService
+from bassi.core_v3.websocket.browser_session_manager import (
+    BrowserSessionManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,10 +140,11 @@ class WebUIServerV3:
 
         def pool_factory() -> BassiAgentSession:
             # Create minimal deps for legacy factory
+            import uuid
+
             from bassi.core_v3.interactive_questions import (
                 InteractiveQuestionService,
             )
-            import uuid
 
             question_service = InteractiveQuestionService()
             chat_id = str(uuid.uuid4())
@@ -154,10 +155,10 @@ class WebUIServerV3:
 
     def _create_capability_factory(self) -> Callable:
         """Create factory for capability discovery."""
+
         from bassi.core_v3.interactive_questions import (
             InteractiveQuestionService,
         )
-        import uuid
 
         def factory(
             question_service: InteractiveQuestionService,
@@ -261,7 +262,8 @@ class WebUIServerV3:
         )
         self.app.include_router(capability_router)
 
-        # Settings routes
+        # Settings routes - register permission_manager for /permissions endpoint
+        settings.set_permission_manager(self.permission_manager)
         self.app.include_router(settings.router)
 
         # WebSocket endpoint (supports both old and new param names)
@@ -335,6 +337,7 @@ class WebUIServerV3:
         """Run the web server."""
         import subprocess
         import sys
+
         import uvicorn
 
         logger.info("Starting Bassi Web UI V3 on http://localhost:8765")
@@ -420,6 +423,67 @@ def create_pool_agent_factory(
             permission_mode=permission_mode,
             mcp_servers=mcp_servers,
             setting_sources=["project", "local"],
+            can_use_tool=(
+                permission_manager.can_use_tool_callback
+                if permission_manager
+                else None
+            ),
+        )
+        return BassiAgentSession(config)
+
+    return factory
+
+
+def create_thinking_mode_agent_factory(
+    permission_manager: Optional[PermissionManager] = None,
+    thinking_mode: bool = True,
+) -> Callable[[], BassiAgentSession]:
+    """
+    Create agent factory for thinking mode agents.
+
+    These agents are created with max_thinking_tokens set based on thinking_mode.
+    Used when swapping agents for thinking mode toggle.
+
+    Args:
+        permission_manager: Optional PermissionManager for can_use_tool callback.
+        thinking_mode: Whether to enable extended thinking tokens.
+    """
+    from bassi.core_v3.services.config_service import ConfigService
+    from bassi.core_v3.services.model_service import get_model_id
+    from bassi.shared.mcp_registry import create_mcp_registry
+    from bassi.shared.permission_config import get_permission_mode
+
+    def factory() -> BassiAgentSession:
+        mcp_config_path = Path(__file__).parent.parent.parent / ".mcp.json"
+        mcp_servers = create_mcp_registry(
+            include_sdk=True,
+            config_path=mcp_config_path,
+        )
+
+        permission_mode = get_permission_mode()
+
+        # Get model from config
+        config_service = ConfigService()
+        model_level = config_service.get_default_model_level()
+        model_id = get_model_id(model_level)
+
+        # Set thinking tokens based on mode
+        # 0 = no thinking, 10000 = extended thinking enabled
+        max_thinking_tokens = 10000 if thinking_mode else 0
+
+        logger.info(
+            f"🧠 [THINKING] Creating agent: model={model_id}, "
+            f"thinking_mode={thinking_mode}, max_tokens={max_thinking_tokens}"
+        )
+
+        config = SessionConfig(
+            allowed_tools=["*"],
+            model_id=model_id,
+            permission_mode=permission_mode,
+            mcp_servers=mcp_servers,
+            setting_sources=["project", "local"],
+            thinking_mode=thinking_mode,
+            max_thinking_tokens=max_thinking_tokens,
             can_use_tool=(
                 permission_manager.can_use_tool_callback
                 if permission_manager

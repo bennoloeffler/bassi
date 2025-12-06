@@ -200,3 +200,105 @@ def running_server(tmp_path):
 def mock_agent_client() -> MockAgentClient:
     """Provide a mock AgentClient instance scoped per test."""
     return MockAgentClient()
+
+
+# ============================================================
+# TestClient + Agent Pool Integration Fixture
+# ============================================================
+#
+# PROBLEM: Starlette's TestClient doesn't fire FastAPI startup events,
+# so the agent pool never starts. Tests using custom session_factory
+# would hang forever waiting for an agent.
+#
+# SOLUTION: This fixture manually starts the pool before creating
+# the TestClient, and cleans up afterward.
+#
+# USAGE:
+#   @pytest.mark.parametrize(
+#       "web_server_with_pool",
+#       [my_custom_factory],  # Pass factory as parameter
+#       indirect=True,
+#   )
+#   def test_something(web_server_with_pool):
+#       with TestClient(web_server_with_pool.app) as client:
+#           with client.websocket_connect("/ws") as ws:
+#               ...
+# ============================================================
+
+
+@pytest.fixture
+def web_server_with_pool(request, tmp_path):
+    """
+    Create WebUIServerV3 with custom session_factory AND started pool.
+
+    This fixture solves the TestClient + Agent Pool integration problem:
+    TestClient doesn't fire FastAPI startup events, so we manually start
+    the pool before yielding the server.
+
+    Args:
+        request: pytest request with custom session_factory as param
+        tmp_path: pytest temporary directory
+
+    Yields:
+        WebUIServerV3 instance with pool started
+
+    Usage:
+        @pytest.mark.parametrize("web_server_with_pool", [my_factory], indirect=True)
+        def test_foo(web_server_with_pool):
+            with TestClient(web_server_with_pool.app) as client:
+                ...
+    """
+    import asyncio
+
+    from bassi.core_v3.services.agent_pool import reset_agent_pool
+
+    # Reset pool to avoid singleton pollution between tests
+    reset_agent_pool()
+
+    # Get custom factory from test parameter
+    custom_factory = request.param
+
+    # Create isolated workspace for this test
+    tmp_workspace = tmp_path / "chats"
+    tmp_workspace.mkdir()
+
+    # Create server with custom factory
+    server = WebUIServerV3(
+        workspace_base_path=str(tmp_workspace),
+        session_factory=custom_factory,
+        pool_size=1,  # Single agent for faster tests
+    )
+
+    # Manually start the pool (TestClient doesn't fire startup events)
+    # Use asyncio.run() which properly manages the event loop lifecycle
+    # This is cleaner than new_event_loop() + set_event_loop()
+    import concurrent.futures
+
+    def start_pool():
+        asyncio.run(server.agent_pool.start())
+
+    # Run in thread to avoid event loop conflicts with pytest-asyncio
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(start_pool)
+        try:
+            future.result(timeout=10)  # Wait up to 10 seconds
+        except concurrent.futures.TimeoutError:
+            reset_agent_pool()
+            raise RuntimeError("Pool startup timed out after 10 seconds")
+        except Exception as e:
+            reset_agent_pool()
+            raise RuntimeError(f"Failed to start agent pool: {e}")
+
+    yield server
+
+    # Cleanup: shutdown pool and reset singleton
+    def shutdown_pool():
+        asyncio.run(server.agent_pool.shutdown(force=True))
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        try:
+            executor.submit(shutdown_pool).result(timeout=5)
+        except Exception:
+            pass
+
+    reset_agent_pool()

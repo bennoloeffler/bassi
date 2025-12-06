@@ -25,7 +25,9 @@ try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
 except ImportError:
-    print("Error: psycopg2-binary is required. Install with: pip install psycopg2-binary")
+    print(
+        "Error: psycopg2-binary is required. Install with: pip install psycopg2-binary"
+    )
     sys.exit(1)
 
 
@@ -51,7 +53,9 @@ def get_db_connection():
     return psycopg2.connect(**conn_params)
 
 
-def download_file(file_id: int, output_dir: Optional[Path] = None) -> Tuple[str, dict]:
+def download_file(
+    file_id: int, output_dir: Optional[Path] = None
+) -> Tuple[str, dict]:
     """
     Download a file from the database and save it to disk.
 
@@ -93,13 +97,15 @@ def download_file(file_id: int, output_dir: Optional[Path] = None) -> Tuple[str,
                 FROM data_files
                 WHERE id = %s
                 """,
-                (file_id,)
+                (file_id,),
             )
 
             result = cur.fetchone()
 
             if not result:
-                raise ValueError(f"File with ID {file_id} not found in database")
+                raise ValueError(
+                    f"File with ID {file_id} not found in database"
+                )
 
             # Extract file data and metadata
             file_name = result["filename"]
@@ -107,7 +113,11 @@ def download_file(file_id: int, output_dir: Optional[Path] = None) -> Tuple[str,
             # Decode base64 data
             file_data = base64.b64decode(file_data_b64)
             mime_type = result["mime_type"]
-            file_size = int(result["file_size_bytes"]) if result["file_size_bytes"] is not None else 0
+            file_size = (
+                int(result["file_size_bytes"])
+                if result["file_size_bytes"] is not None
+                else 0
+            )
             file_hash = result["file_hash"]
 
             # Sanitize filename to avoid path traversal
@@ -120,7 +130,9 @@ def download_file(file_id: int, output_dir: Optional[Path] = None) -> Tuple[str,
                 suffix = output_path.suffix
                 counter = 1
                 while output_path.exists():
-                    output_path = output_dir / f"{base_name}_{counter}{suffix}"
+                    output_path = (
+                        output_dir / f"{base_name}_{counter}{suffix}"
+                    )
                     counter += 1
 
             # Write file to disk
@@ -134,8 +146,16 @@ def download_file(file_id: int, output_dir: Optional[Path] = None) -> Tuple[str,
                 "mime_type": mime_type,
                 "file_size": file_size,
                 "file_hash": file_hash,
-                "created_at": str(result["created_at"]) if result["created_at"] else None,
-                "updated_at": str(result["updated_at"]) if result["updated_at"] else None,
+                "created_at": (
+                    str(result["created_at"])
+                    if result["created_at"]
+                    else None
+                ),
+                "updated_at": (
+                    str(result["updated_at"])
+                    if result["updated_at"]
+                    else None
+                ),
             }
 
             return str(output_path), metadata
@@ -149,20 +169,18 @@ def main():
         description="Download a file from the CRM database to the filesystem"
     )
     parser.add_argument(
-        "file_id",
-        type=int,
-        help="ID of the file in the database"
+        "file_id", type=int, help="ID of the file in the database"
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
-        help="Output directory (default: _RESULTS_FROM_AGENT/)"
+        help="Output directory (default: _RESULTS_FROM_AGENT/)",
     )
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Suppress output (only print file path)"
+        help="Suppress output (only print file path)",
     )
 
     args = parser.parse_args()
@@ -173,7 +191,7 @@ def main():
         if args.quiet:
             print(file_path)
         else:
-            print(f"✅ File downloaded successfully!")
+            print("✅ File downloaded successfully!")
             print(f"   File path: {file_path}")
             print(f"   Original name: {metadata['file_name']}")
             print(f"   MIME type: {metadata['mime_type']}")
@@ -186,6 +204,7 @@ def main():
     except Exception as e:
         print(f"❌ Unexpected error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

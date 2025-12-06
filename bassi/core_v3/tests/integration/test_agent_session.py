@@ -158,7 +158,12 @@ class TestBassiAgentSession:
 
         assert len(results) == 2
         assert session.stats.message_count == 1
-        assert mock_agent_client.sent_prompts[0]["prompt"] == "Hello world"
+        # Prompts are now always sent as streaming format (AsyncIterable)
+        # to enable can_use_tool callback. The format is a list of user messages.
+        sent = mock_agent_client.sent_prompts[0]["prompt"]
+        assert isinstance(sent, list)
+        assert sent[0]["type"] == "user"
+        assert sent[0]["message"]["content"][0]["text"] == "Hello world"
 
     @pytest.mark.asyncio
     async def test_interrupt_delegates_to_client(self, mock_agent_client):

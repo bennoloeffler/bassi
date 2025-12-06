@@ -264,21 +264,21 @@ def test_agent_maintains_separate_contexts(page, live_server):
     response_2b_lower = response_2b.lower()
 
     # Session 1 should remember Alice (not Bob)
-    assert "alice" in response_1b_lower, (
-        f"Session 1 should remember 'alice'. Response: {response_1b}"
-    )
-    assert "bob" not in response_1b_lower, (
-        f"Session 1 should NOT know about 'bob'. Response: {response_1b}"
-    )
+    assert (
+        "alice" in response_1b_lower
+    ), f"Session 1 should remember 'alice'. Response: {response_1b}"
+    assert (
+        "bob" not in response_1b_lower
+    ), f"Session 1 should NOT know about 'bob'. Response: {response_1b}"
     print("   ✅ Session 1 correctly remembers Alice")
 
     # Session 2 should remember Bob (not Alice)
-    assert "bob" in response_2b_lower, (
-        f"Session 2 should remember 'bob'. Response: {response_2b}"
-    )
-    assert "alice" not in response_2b_lower, (
-        f"Session 2 should NOT know about 'alice'. Response: {response_2b}"
-    )
+    assert (
+        "bob" in response_2b_lower
+    ), f"Session 2 should remember 'bob'. Response: {response_2b}"
+    assert (
+        "alice" not in response_2b_lower
+    ), f"Session 2 should NOT know about 'alice'. Response: {response_2b}"
     print("   ✅ Session 2 correctly remembers Bob")
 
     print("\n" + "=" * 60)

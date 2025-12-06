@@ -78,9 +78,13 @@ class CapabilityService:
             temp_workspace = SessionWorkspace(
                 "capabilities-discovery", create=True
             )
-            logger.info("🔧 Creating temp session for capability discovery...")
+            logger.info(
+                "🔧 Creating temp session for capability discovery..."
+            )
             temp_session = self.session_factory(temp_service, temp_workspace)
-            logger.info(f"🔧 Temp session created: {type(temp_session).__name__}")
+            logger.info(
+                f"🔧 Temp session created: {type(temp_session).__name__}"
+            )
 
             try:
                 logger.info("🔗 Connecting temp session...")
@@ -95,7 +99,9 @@ class CapabilityService:
                     "ready", session_id="capabilities-discovery"
                 ):
                     msg_type = type(message).__name__
-                    logger.info(f"📨 Capability discovery - received: {msg_type}")
+                    logger.info(
+                        f"📨 Capability discovery - received: {msg_type}"
+                    )
 
                     # Extract tool names from system message with 'init' subtype
                     if isinstance(message, SystemMessage):

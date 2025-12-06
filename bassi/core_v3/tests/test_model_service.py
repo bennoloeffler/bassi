@@ -156,7 +156,9 @@ class TestModelEscalationTracker:
             result = tracker.on_failure()
         assert result is None  # No escalation
         assert tracker.current_level == 3
-        assert tracker.consecutive_failures == 3  # Not reset since no escalation
+        assert (
+            tracker.consecutive_failures == 3
+        )  # Not reset since no escalation
 
     def test_auto_escalate_disabled(self):
         """Should not escalate when auto_escalate is False."""

@@ -53,7 +53,8 @@ class SessionService:
         session_dirs = [
             d
             for d in workspace_dir.iterdir()
-            if d.is_dir() and ((d / "chat.json").exists() or (d / "session.json").exists())
+            if d.is_dir()
+            and ((d / "chat.json").exists() or (d / "session.json").exists())
         ]
 
         # Load metadata for each session
@@ -70,7 +71,9 @@ class SessionService:
                 sessions.append(
                     {
                         "session_id": session_dir.name,
-                        "display_name": state.get("display_name", session_dir.name),
+                        "display_name": state.get(
+                            "display_name", session_dir.name
+                        ),
                         "state": state.get("state", "active"),
                         "created_at": state.get(
                             "created_at",
