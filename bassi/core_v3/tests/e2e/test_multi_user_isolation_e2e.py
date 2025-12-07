@@ -579,17 +579,25 @@ def test_reconnection_after_network_issue(page, live_server):
 # =============================================================================
 
 
-def test_five_concurrent_users_all_work(page, live_server):
+def test_max_concurrent_users_all_work(page, live_server):
     """
-    USE CASE: Five users connect simultaneously - all should work.
+    USE CASE: Max concurrent users connect simultaneously - all should work.
 
-    The agent pool has 5 agents, so 5 concurrent users should all work.
+    The agent pool has a configurable max size (from PoolConfig/env vars).
+    All users up to that max should be able to connect.
 
     Steps:
-    1. Create 5 browser contexts (1 from fixture, 4 additional)
-    2. Connect all 5 to the server
-    3. Verify all 5 get connected successfully
+    1. Get pool max_size from config
+    2. Create that many browser contexts
+    3. Connect all to the server
+    4. Verify all get connected successfully
     """
+    from bassi.config import get_pool_config
+
+    # Get actual pool max size from config
+    pool_config = get_pool_config()
+    max_users = pool_config.max_size
+
     # Use fixture page as first user
     browser = page.context.browser
 
@@ -598,17 +606,17 @@ def test_five_concurrent_users_all_work(page, live_server):
     all_pages = [page]  # Start with fixture page
 
     try:
-        # Create 4 more contexts (for users 2-5)
-        for i in range(4):
+        # Create (max_users - 1) more contexts
+        for i in range(max_users - 1):
             ctx = browser.new_context()
             additional_contexts.append(ctx)
             all_pages.append(ctx.new_page())
 
-        # Connect all 5
+        # Connect all users
         for i, p in enumerate(all_pages):
             p.goto(live_server)
 
-        # Verify all 5 connect successfully
+        # Verify all connect successfully
         sessions = set()
         for i, p in enumerate(all_pages):
             session = _wait_for_connection(p, timeout=30000)
@@ -616,8 +624,8 @@ def test_five_concurrent_users_all_work(page, live_server):
             sessions.add(session)
 
         # All should have unique sessions
-        assert len(sessions) == 5, (
-            f"All 5 users should have unique sessions, got {len(sessions)}"
+        assert len(sessions) == max_users, (
+            f"All {max_users} users should have unique sessions, got {len(sessions)}"
         )
 
     finally:
