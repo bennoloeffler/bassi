@@ -643,56 +643,117 @@ class AgentPool:
 
     async def release(self, agent: BassiAgentSession) -> None:
         """
-        Release an agent back to the pool.
+        Release an agent by DESTROYING it and creating a fresh replacement.
 
-        Clears agent state (history, workspace) but keeps it connected.
+        We do NOT reuse agents because the SDK's conversation context persists
+        even across different session_ids. The only reliable way to ensure
+        complete isolation between chat sessions is to use fresh agents.
 
         Args:
-            agent: Agent to release
+            agent: Agent to release (will be destroyed)
         """
+        pooled_to_remove = None
+        browser_id = "unknown"
+
         async with self._lock:
             for pooled in self._agents:
                 if pooled.agent is agent:
                     browser_id = pooled.browser_id or "unknown"
-
-                    # Reset SDK-side context to avoid leaking prior chat history
-                    await agent.clear_server_context()
-
-                    # Clear agent state
-                    agent.message_history.clear()
-                    agent.stats.message_count = 0
-                    agent.stats.tool_calls = 0
-                    agent.current_workspace_id = None
-
-                    # CRITICAL: Clear conversation context to prevent context leakage
-                    # between different chat sessions using the same agent
-                    agent._conversation_context = None
-
-                    # Clear workspace and question_service references
-                    if hasattr(agent, "workspace"):
-                        agent.workspace = None
-                    if hasattr(agent, "question_service"):
-                        agent.question_service = None
-
-                    # Mark as available
-                    pooled.in_use = False
-                    pooled.released_at = time.time()
-                    pooled.browser_id = None
-                    self._total_releases += 1
-
-                    logger.info(
-                        f"🔄 [POOL] Released agent from browser {browser_id[:8]} "
-                        f"(used {pooled.use_count} times, pool: {len(self._agents)})"
-                    )
+                    pooled_to_remove = pooled
                     break
+
+            if pooled_to_remove:
+                # Remove agent from pool - it will be destroyed
+                self._agents.remove(pooled_to_remove)
+                self._total_releases += 1
+
+                logger.info(
+                    f"🗑️ [POOL] Destroying agent from browser {browser_id[:8]} "
+                    f"(was used {pooled_to_remove.use_count} times, "
+                    f"remaining pool: {len(self._agents)})"
+                )
             else:
                 logger.warning(
                     "⚠️ [POOL] Agent not found in pool during release"
                 )
+                return
 
-        # Signal that an agent is available
+        # Disconnect the old agent in background (fire and forget)
+        # This avoids blocking and handles cancel scope issues gracefully
+        asyncio.create_task(self._destroy_agent(agent, browser_id))
+
+        # Create a fresh replacement agent in background
+        asyncio.create_task(self._create_replacement_agent())
+
+        # Signal that pool state changed (new agent will be available soon)
         async with self._available:
             self._available.notify_all()
+
+    async def _destroy_agent(
+        self, agent: BassiAgentSession, browser_id: str
+    ) -> None:
+        """
+        Destroy an agent by disconnecting it.
+
+        Runs in background to avoid blocking the release call.
+        Handles errors gracefully since the agent is already removed from pool.
+        """
+        try:
+            await agent.disconnect()
+            logger.info(
+                f"✅ [POOL] Agent from {browser_id[:8]} disconnected successfully"
+            )
+        except Exception as e:
+            # Log but don't raise - agent is already removed from pool
+            # Let Python GC clean up the resources
+            logger.warning(
+                f"⚠️ [POOL] Failed to disconnect agent from {browser_id[:8]}: {e}"
+            )
+
+    async def _create_replacement_agent(self) -> None:
+        """
+        Create a fresh agent to replace a destroyed one.
+
+        Respects pool limits and handles errors gracefully.
+        """
+        # Check if we should create a replacement
+        current = len(self._agents)
+        total_with_growing = current + self._growth_in_progress
+
+        if self._shutdown:
+            logger.debug("📊 [POOL] Skipping replacement (shutdown)")
+            return
+
+        if total_with_growing >= self.config.max_size:
+            logger.debug(
+                f"📊 [POOL] Skipping replacement (at MAX={self.config.max_size})"
+            )
+            return
+
+        try:
+            self._growth_in_progress += 1
+            logger.info(
+                f"🆕 [POOL] Creating replacement agent "
+                f"(current={current}, MAX={self.config.max_size})"
+            )
+
+            agent = await self._create_and_connect_agent()
+
+            async with self._lock:
+                self._agents.append(PooledAgent(agent=agent))
+
+            logger.info(
+                f"✅ [POOL] Replacement agent ready (pool: {len(self._agents)})"
+            )
+
+            # Signal that new agent is available
+            async with self._available:
+                self._available.notify_all()
+
+        except Exception as e:
+            logger.error(f"❌ [POOL] Failed to create replacement agent: {e}")
+        finally:
+            self._growth_in_progress -= 1
 
     async def shutdown(self, force: bool = False) -> None:
         """

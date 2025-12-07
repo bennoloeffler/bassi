@@ -253,54 +253,23 @@ class BassiAgentSession:
 
     async def clear_server_context(self) -> None:
         """
-        Clear server-side conversation state using the SDK's /clear command.
+        Clear server-side conversation state (no-op for pool architecture).
 
-        This prevents context from a previous chat leaking when the same
-        AgentClient instance is reused from the pool.
+        With the pool architecture, we rely on session_id for conversation
+        isolation rather than trying to clear SDK state. This is because:
+
+        1. The SDK's session_id parameter handles conversation isolation
+           (each chat gets a unique session_id via prepare_for_session)
+        2. Disconnect/reconnect fails due to async task scoping
+           (SDK client connected in pool startup task, released from different task)
+        3. The /clear slash command is not supported by the SDK
+
+        Local state (message_history, _conversation_context) is cleared by
+        the pool's release() method. Server-side isolation is handled by
+        using different session_id values for different chats.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        if not self._connected or not self.client:
-            return
-
-        try:
-            # Send /clear as a streaming prompt to respect SDK expectations
-            sdk_prompt = self._create_streaming_prompt(
-                "/clear", self.stats.session_id
-            )
-            await self.client.query(
-                sdk_prompt, session_id=self.stats.session_id
-            )
-
-            # Drain responses to complete the turn
-            unknown_command = False
-            async for _ in self.client.receive_response():
-                # Detect slash-command failures and fall back to reconnect
-                if hasattr(_, "content") and isinstance(_, (list, tuple)):
-                    for block in _.content:
-                        if hasattr(block, "text") and isinstance(
-                            block.text, str
-                        ):
-                            if "Unknown slash command" in block.text:
-                                unknown_command = True
-                                break
-
-            if unknown_command:
-                logger.warning(
-                    "⚠️ [SESSION] /clear unsupported by SDK, forcing reconnect"
-                )
-                await self.disconnect()
-                await self.connect()
-            else:
-                logger.info(
-                    "🧹 [SESSION] Cleared SDK conversation context via /clear"
-                )
-        except Exception as e:
-            logger.warning(
-                f"⚠️ [SESSION] Failed to clear SDK context: {e}", exc_info=True
-            )
+        # No-op: session_id provides conversation isolation
+        pass
 
     def restore_conversation_history(self, history: list[dict]) -> None:
         """

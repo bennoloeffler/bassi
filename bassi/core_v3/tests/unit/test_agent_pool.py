@@ -1,5 +1,6 @@
 """Unit tests for agent_pool.py - Context isolation and agent lifecycle."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -26,7 +27,7 @@ def mock_agent():
     agent.question_service = MagicMock()
     agent.connect = AsyncMock()
     agent.disconnect = AsyncMock()
-    agent.clear_server_context = AsyncMock()  # Required for release()
+    agent.clear_server_context = AsyncMock()
     return agent
 
 
@@ -49,66 +50,52 @@ def reset_pool():
 
 
 class TestAgentPoolRelease:
-    """Tests for agent release and context isolation."""
+    """Tests for agent release (destroy and replace model)."""
 
     @pytest.mark.asyncio
-    async def test_release_clears_conversation_context(
-        self, mock_agent, mock_agent_factory
+    async def test_release_removes_agent_from_pool(
+        self, mock_agent
     ):
         """
-        CRITICAL: Test that releasing an agent clears _conversation_context.
+        Test that releasing an agent REMOVES it from the pool.
 
-        This prevents conversation history from leaking between different
-        chat sessions when agents are reused from the pool.
-
-        Bug scenario before fix:
-        1. User A chats, introduces self as "Benno"
-        2. Agent released back to pool (but _conversation_context retained!)
-        3. User B gets same agent, introduces self as "Rumpelstilzchen"
-        4. Agent resumes User A's chat - confused identities!
+        With destroy-and-replace model, agents are not reused.
         """
-        pool = AgentPool(size=1, agent_factory=mock_agent_factory)
+        # Use a factory that creates DISTINCT agents (not the released one)
+        def factory():
+            agent = MagicMock()
+            agent.connect = AsyncMock()
+            agent.disconnect = AsyncMock()
+            return agent
 
-        # Manually add the agent to pool (skip actual connection)
+        pool = AgentPool(size=1, agent_factory=factory)
+
+        # Manually add the agent to pool
         pool._agents.append(
             PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
         )
         pool._started = True
 
-        # Verify agent has conversation context
-        assert mock_agent._conversation_context is not None
-        assert "Previous chat" in mock_agent._conversation_context
+        # Verify agent is in pool
+        assert len(pool._agents) == 1
+        assert pool._agents[0].agent is mock_agent
 
-        # Release agent back to pool
+        # Release agent
         await pool.release(mock_agent)
 
-        # CRITICAL: Conversation context must be cleared
-        assert mock_agent._conversation_context is None, (
-            "_conversation_context was not cleared on release! "
-            "This causes context leakage between chat sessions."
+        # Allow background tasks to run
+        await asyncio.sleep(0.1)
+
+        # Agent should be removed from pool (replacement is a different agent)
+        assert all(p.agent is not mock_agent for p in pool._agents), (
+            "Released agent should be removed from pool"
         )
 
     @pytest.mark.asyncio
-    async def test_release_clears_message_history(
+    async def test_release_calls_disconnect(
         self, mock_agent, mock_agent_factory
     ):
-        """Test that releasing an agent clears message_history."""
-        pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(
-            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
-        )
-        pool._started = True
-
-        assert len(mock_agent.message_history) > 0
-
-        await pool.release(mock_agent)
-
-        # message_history should be empty after release
-        assert len(mock_agent.message_history) == 0
-
-    @pytest.mark.asyncio
-    async def test_release_clears_stats(self, mock_agent, mock_agent_factory):
-        """Test that releasing an agent resets stats."""
+        """Test that releasing an agent calls disconnect."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
         pool._agents.append(
             PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
@@ -117,138 +104,140 @@ class TestAgentPoolRelease:
 
         await pool.release(mock_agent)
 
-        assert mock_agent.stats.message_count == 0
-        assert mock_agent.stats.tool_calls == 0
+        # Allow background tasks to run
+        await asyncio.sleep(0.1)
+
+        # Disconnect should be called in background
+        mock_agent.disconnect.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_release_clears_workspace_id(
+    async def test_release_creates_replacement_agent(
+        self, mock_agent
+    ):
+        """Test that releasing an agent triggers creation of a replacement."""
+        from bassi.config import PoolConfig
+
+        agents_created = []
+
+        def factory():
+            agent = MagicMock()
+            agent.connect = AsyncMock()
+            agent.disconnect = AsyncMock()
+            agents_created.append(agent)
+            return agent
+
+        config = PoolConfig(initial_size=2, keep_idle_size=1, max_size=5)
+        pool = AgentPool(agent_factory=factory, pool_config=config)
+        pool._agents.append(
+            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
+        )
+        pool._started = True
+
+        initial_count = len(agents_created)
+
+        await pool.release(mock_agent)
+
+        # Allow background tasks to run (replacement creation)
+        await asyncio.sleep(0.2)
+
+        # A replacement agent should have been created
+        assert len(agents_created) > initial_count, (
+            "Replacement agent should be created after release"
+        )
+
+    @pytest.mark.asyncio
+    async def test_release_increments_total_releases(
         self, mock_agent, mock_agent_factory
     ):
-        """Test that releasing an agent clears current_workspace_id."""
+        """Test that releasing an agent increments release counter."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
         pool._agents.append(
             PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
         )
         pool._started = True
 
-        assert mock_agent.current_workspace_id is not None
+        assert pool._total_releases == 0
 
         await pool.release(mock_agent)
 
-        assert mock_agent.current_workspace_id is None
+        assert pool._total_releases == 1
 
     @pytest.mark.asyncio
-    async def test_release_clears_workspace_reference(
+    async def test_release_unknown_agent_logs_warning(
         self, mock_agent, mock_agent_factory
     ):
-        """Test that releasing an agent clears workspace reference."""
+        """Test that releasing an unknown agent logs warning and returns."""
         pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(
-            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
-        )
         pool._started = True
+        # Don't add agent to pool
 
-        assert mock_agent.workspace is not None
-
+        # Should not raise, just log warning
         await pool.release(mock_agent)
 
-        assert mock_agent.workspace is None
-
-    @pytest.mark.asyncio
-    async def test_release_clears_question_service(
-        self, mock_agent, mock_agent_factory
-    ):
-        """Test that releasing an agent clears question_service reference."""
-        pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pool._agents.append(
-            PooledAgent(agent=mock_agent, in_use=True, browser_id="browser-1")
-        )
-        pool._started = True
-
-        assert mock_agent.question_service is not None
-
-        await pool.release(mock_agent)
-
-        assert mock_agent.question_service is None
-
-    @pytest.mark.asyncio
-    async def test_release_marks_agent_available(
-        self, mock_agent, mock_agent_factory
-    ):
-        """Test that releasing an agent marks it as available."""
-        pool = AgentPool(size=1, agent_factory=mock_agent_factory)
-        pooled = PooledAgent(
-            agent=mock_agent, in_use=True, browser_id="browser-1"
-        )
-        pool._agents.append(pooled)
-        pool._started = True
-
-        await pool.release(mock_agent)
-
-        assert pooled.in_use is False
-        assert pooled.browser_id is None
+        # disconnect should NOT be called since agent wasn't in pool
+        mock_agent.disconnect.assert_not_called()
 
 
 class TestAgentPoolContextIsolation:
     """Integration-style tests for context isolation between chat sessions."""
 
     @pytest.mark.asyncio
-    async def test_agent_reuse_has_clean_state(self, mock_agent_factory):
+    async def test_new_chat_gets_fresh_agent(self):
         """
-        Test that an agent reused from pool starts with clean state.
+        Test that after release, the next acquire gets a FRESH agent.
 
-        Simulates:
-        1. Browser A acquires agent, uses it
-        2. Browser A disconnects, agent released
-        3. Browser B acquires same agent
-        4. Agent should have NO context from Browser A
+        With destroy-and-replace model:
+        1. Browser A acquires agent1
+        2. Browser A releases agent1 (destroyed)
+        3. Browser B acquires agent2 (fresh, from factory)
+        4. agent2 has NO context from agent1
         """
-        # Create fresh mock for this test
-        agent = MagicMock()
-        agent.message_history = []
-        agent.stats = MagicMock()
-        agent.stats.message_count = 0
-        agent.stats.tool_calls = 0
-        agent.current_workspace_id = None
-        agent._conversation_context = None
-        agent.workspace = None
-        agent.question_service = None
-        agent.connect = AsyncMock()
-        agent.clear_server_context = AsyncMock()  # Required for release()
+        agents_created = []
 
         def factory():
+            agent = MagicMock()
+            agent.message_history = []
+            agent.stats = MagicMock()
+            agent.stats.message_count = 0
+            agent._conversation_context = None
+            agent.connect = AsyncMock()
+            agent.disconnect = AsyncMock()
+            agents_created.append(agent)
             return agent
 
-        pool = AgentPool(size=1, agent_factory=factory)
-        pool._agents.append(PooledAgent(agent=agent, in_use=False))
+        from bassi.config import PoolConfig
+        config = PoolConfig(initial_size=1, keep_idle_size=1, max_size=3)
+        pool = AgentPool(agent_factory=factory, pool_config=config)
         pool._started = True
 
+        # Pre-populate with one agent
+        first_agent = factory()
+        pool._agents.append(PooledAgent(agent=first_agent, in_use=False))
+
         # Browser A acquires
-        acquired_agent = await pool.acquire("browser-A")
-        assert acquired_agent is agent
+        agent_a = await pool.acquire("browser-A")
+        assert agent_a is first_agent
 
-        # Simulate Browser A usage
-        agent.message_history = ["user: I am Benno", "assistant: Hello Benno"]
-        agent.stats.message_count = 2
-        agent._conversation_context = "User introduced as Benno"
-        agent.current_workspace_id = "chat-A"
-        agent.workspace = MagicMock()
+        # Simulate Browser A usage - pollute the agent
+        agent_a._conversation_context = "User introduced as Benno"
+        agent_a.message_history = ["I am Benno"]
 
-        # Browser A disconnects
-        await pool.release(agent)
+        # Browser A disconnects - agent destroyed
+        await pool.release(agent_a)
 
-        # Verify clean state
-        assert agent._conversation_context is None
-        assert agent.current_workspace_id is None
-        assert agent.workspace is None
+        # Allow background tasks to run (replacement creation)
+        await asyncio.sleep(0.2)
 
-        # Browser B acquires (same agent from pool)
-        acquired_agent_b = await pool.acquire("browser-B")
-        assert acquired_agent_b is agent  # Same agent reused
+        # Browser B acquires - should get a DIFFERENT agent
+        agent_b = await pool.acquire("browser-B")
 
-        # Agent should be clean for Browser B
-        # (no leftover context from Browser A)
-        assert agent._conversation_context is None
+        # Agent B should be fresh (from factory)
+        assert agent_b._conversation_context is None, (
+            "New agent should have no conversation context"
+        )
+        assert agent_b.message_history == [], (
+            "New agent should have empty message history"
+        )
 
 
 class TestAgentPoolDynamicSizing:
@@ -313,6 +302,7 @@ class TestAgentPoolDynamicSizing:
     async def test_max_size_limit_respected(self):
         """Test that pool respects max_size limit after brief wait."""
         from bassi.config import PoolConfig
+        import time
 
         def factory():
             return self._create_mock_agent()
@@ -327,8 +317,6 @@ class TestAgentPoolDynamicSizing:
         pool._started = True
 
         # Try to acquire third - should wait briefly (2s) then raise PoolExhaustedException
-        # This handles race conditions when browser refreshes (old connection releasing)
-        import time
         start = time.time()
         with pytest.raises(PoolExhaustedException) as exc_info:
             await pool.acquire("browser-3", timeout=0.1)
@@ -343,21 +331,24 @@ class TestAgentPoolDynamicSizing:
         assert exc_info.value.in_use == 2
 
     @pytest.mark.asyncio
-    async def test_acquire_succeeds_when_agent_released_during_wait(self):
-        """Test that acquire succeeds if an agent is released during the brief wait.
+    async def test_acquire_succeeds_when_replacement_created_during_wait(self):
+        """Test that acquire succeeds when a replacement agent becomes available.
 
-        This tests the fix for the race condition when browser refreshes:
-        1. Browser disconnects (old connection)
-        2. Browser reconnects immediately (new connection)
-        3. New connection waits briefly for old agent to be released
-        4. Old connection finishes cleanup, releases agent
-        5. New connection acquires the released agent
+        With destroy-and-replace model:
+        1. Pool at max, all in use
+        2. New browser waits for agent
+        3. Old browser releases agent (triggers replacement creation)
+        4. Waiting browser gets the replacement agent
         """
         from bassi.config import PoolConfig
-        import asyncio
+        import time
+
+        agents_created = []
 
         def factory():
-            return self._create_mock_agent()
+            agent = self._create_mock_agent()
+            agents_created.append(agent)
+            return agent
 
         # Pool with max_size=2
         config = PoolConfig(initial_size=1, keep_idle_size=0, max_size=2)
@@ -370,25 +361,24 @@ class TestAgentPoolDynamicSizing:
         pool._agents.append(PooledAgent(agent=agent2, in_use=True, browser_id="b2"))
         pool._started = True
 
-        # Schedule agent release after 0.5 seconds (simulates old connection cleanup)
+        # Schedule agent release after 0.5 seconds
         async def delayed_release():
             await asyncio.sleep(0.5)
             await pool.release(agent1)
 
         release_task = asyncio.create_task(delayed_release())
 
-        # Try to acquire - should wait and then succeed when agent is released
-        import time
+        # Try to acquire - should wait and then succeed when replacement is created
         start = time.time()
         acquired_agent = await pool.acquire("browser-3")
         elapsed = time.time() - start
 
-        # Should have acquired the released agent
-        assert acquired_agent is agent1
+        # Should have acquired the REPLACEMENT agent (not agent1)
+        assert acquired_agent is not agent1, "Should get replacement, not the destroyed agent"
         assert elapsed >= 0.4, f"Should have waited for release, got {elapsed:.2f}s"
-        assert elapsed < 2.0, f"Waited too long: {elapsed:.2f}s"
+        assert elapsed < 3.0, f"Waited too long: {elapsed:.2f}s"
 
-        await release_task  # Ensure task completes
+        await release_task
 
     @pytest.mark.asyncio
     async def test_agents_created_on_demand_stat(self):
