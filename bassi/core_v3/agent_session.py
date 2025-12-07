@@ -251,6 +251,57 @@ class BassiAgentSession:
         self._connected = False
         self.client = None
 
+    async def clear_server_context(self) -> None:
+        """
+        Clear server-side conversation state using the SDK's /clear command.
+
+        This prevents context from a previous chat leaking when the same
+        AgentClient instance is reused from the pool.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not self._connected or not self.client:
+            return
+
+        try:
+            # Send /clear as a streaming prompt to respect SDK expectations
+            sdk_prompt = self._create_streaming_prompt(
+                "/clear", self.stats.session_id
+            )
+            await self.client.query(
+                sdk_prompt, session_id=self.stats.session_id
+            )
+
+            # Drain responses to complete the turn
+            unknown_command = False
+            async for _ in self.client.receive_response():
+                # Detect slash-command failures and fall back to reconnect
+                if hasattr(_, "content") and isinstance(_, (list, tuple)):
+                    for block in _.content:
+                        if hasattr(block, "text") and isinstance(
+                            block.text, str
+                        ):
+                            if "Unknown slash command" in block.text:
+                                unknown_command = True
+                                break
+
+            if unknown_command:
+                logger.warning(
+                    "⚠️ [SESSION] /clear unsupported by SDK, forcing reconnect"
+                )
+                await self.disconnect()
+                await self.connect()
+            else:
+                logger.info(
+                    "🧹 [SESSION] Cleared SDK conversation context via /clear"
+                )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ [SESSION] Failed to clear SDK context: {e}", exc_info=True
+            )
+
     def restore_conversation_history(self, history: list[dict]) -> None:
         """
         Restore conversation history from workspace.

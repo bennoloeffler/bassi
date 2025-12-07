@@ -1,5 +1,6 @@
 """Tests for web_server_v3.py - Complete test suite for FastAPI web server."""
 
+from collections import deque
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -668,6 +669,34 @@ def test_list_session_files_multiple_files(test_client, web_server, tmp_path):
     files = response.json()
     refs = [f["ref"] for f in files]
     assert refs == ["a.txt", "b.txt", "c.txt"]
+
+
+def test_get_file_content_serves_workspace_file(test_client, web_server, tmp_path):
+    """Ensure files are served from chats/<session_id>/DATA_FROM_USER/ paths."""
+    from bassi.core_v3.session_workspace import SessionWorkspace
+
+    session_id = "chat-abc"
+    workspace = SessionWorkspace(session_id, base_path=tmp_path, create=True)
+    web_server.connection_manager.workspaces[session_id] = workspace
+
+    # Create a file inside the workspace DATA_FROM_USER directory
+    data_dir = workspace.physical_path / "DATA_FROM_USER"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    file_path = data_dir / "hello.txt"
+    file_path.write_text("hello world", encoding="utf-8")
+
+    # Register in file registry so list endpoint would return it (mirrors upload flow)
+    rel_path = str(file_path.relative_to(workspace.physical_path))
+    workspace.file_registry.register_upload(
+        filename="hello.txt",
+        path=rel_path,
+        size=file_path.stat().st_size,
+        mime_type="text/plain",
+    )
+
+    response = test_client.get(f"/api/sessions/{session_id}/file/DATA_FROM_USER/hello.txt")
+    assert response.status_code == 200
+    assert response.text == "hello world"
 
 
 def test_list_session_files_handles_upload_errors(
@@ -1415,5 +1444,139 @@ def test_user_message_uses_connection_session_id(web_server_with_pool):
                     break
 
     assert _captured_session_ids == [
-        session_id
+            session_id
     ], "session.query should receive the active connection_id as session_id"
+
+
+# Tracking list for context isolation test
+_context_clients = []
+
+
+class ContextAwareMockClient(MockAgentClient):
+    """Mock client that simulates server-side memory unless cleared."""
+
+    def __init__(self):
+        super().__init__()
+        self.memory = None
+
+    async def query(self, prompt, /, *, session_id: str = "default") -> None:
+        # Use base behavior to record consumed prompt
+        await super().query(prompt, session_id=session_id)
+
+        consumed = self.sent_prompts[-1]["prompt"]
+        text_payload = ""
+
+        if isinstance(consumed, list) and consumed:
+            msg = consumed[0]
+            if isinstance(msg, dict):
+                content = msg.get("message", {}).get("content", [])
+                if isinstance(content, list):
+                    text_payload = "".join(
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict)
+                    )
+        elif isinstance(consumed, str):
+            text_payload = consumed
+
+        # Handle slash clear
+        if "/clear" in text_payload:
+            self.memory = None
+            self._active_stream = deque()
+            return
+
+        # Remember name from prompt
+        if "My name is" in text_payload:
+            self.memory = text_payload.split("My name is", 1)[1].strip()
+            self._active_stream = deque(
+                [
+                    AssistantMessage(
+                        content=[TextBlock(text="Noted")], model="test-model"
+                    )
+                ]
+            )
+            return
+
+        if "What's my name" in text_payload:
+            answer = self.memory or "I don't know"
+            self._active_stream = deque(
+                [
+                    AssistantMessage(
+                        content=[TextBlock(text=answer)], model="test-model"
+                    )
+                ]
+            )
+            return
+
+        self._active_stream = deque()
+
+
+def _context_isolation_factory(
+    question_service: InteractiveQuestionService,
+    workspace: SessionWorkspace,
+):
+    """Factory that uses ContextAwareMockClient to verify isolation."""
+    global _context_clients
+    config = SessionConfig(permission_mode="bypassPermissions")
+
+    def client_factory(config: SessionConfig):
+        client = ContextAwareMockClient()
+        _context_clients.append(client)
+        return client
+
+    session = BassiAgentSession(config, client_factory=client_factory)
+    session.workspace = workspace
+    return session
+
+
+def _drain_until_complete(ws, max_messages: int = 20):
+    """Drain websocket until message_complete or max_messages."""
+    for _ in range(max_messages):
+        msg = ws.receive_json()
+        if msg.get("type") == "message_complete":
+            break
+
+
+def _collect_text_response(ws, max_messages: int = 20) -> str:
+    """Collect concatenated text_delta content until completion."""
+    deltas: list[str] = []
+    for _ in range(max_messages):
+        msg = ws.receive_json()
+        if msg.get("type") == "text_delta":
+            deltas.append(msg.get("text", ""))
+        if msg.get("type") == "message_complete":
+            break
+    return "".join(deltas)
+
+
+@pytest.mark.parametrize(
+    "web_server_with_pool", [_context_isolation_factory], indirect=True
+)
+def test_new_chat_does_not_inherit_context(web_server_with_pool):
+    """
+    Ensure a new chat does NOT inherit prior server-side context from the pool.
+
+    The ContextAwareMockClient remembers a name unless /clear is sent. When the
+    first session disconnects, agent_pool.release() should clear SDK context so
+    the next chat cannot see the previous name.
+    """
+    global _context_clients
+    _context_clients = []
+
+    with TestClient(web_server_with_pool.app) as client:
+        # Session A: teach a name
+        with client.websocket_connect("/ws") as ws:
+            skip_connection_messages(ws)
+            ws.send_json({"type": "user_message", "content": "My name is Alice"})
+            _drain_until_complete(ws)
+
+        # Session B: start fresh and ask for the name
+        with client.websocket_connect("/ws") as ws2:
+            skip_connection_messages(ws2)
+            ws2.send_json({"type": "user_message", "content": "What's my name?"})
+            response_text = _collect_text_response(ws2)
+
+    # Validate the mock client was reused and context was cleared
+    assert _context_clients, "Mock client should be created"
+    assert _context_clients[-1].memory is None, "Memory should be cleared by /clear"
+    assert response_text == "I don't know"

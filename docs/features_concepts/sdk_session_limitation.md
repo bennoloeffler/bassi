@@ -133,3 +133,4 @@ We could eliminate context injection and use native session management.
 - Claude Agent SDK source: `.venv/lib/python3.11/site-packages/claude_agent_sdk/client.py`
 - Original error: `RuntimeError: Attempted to exit cancel scope in a different task than it was entered in`
 
+

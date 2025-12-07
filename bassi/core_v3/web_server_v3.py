@@ -31,6 +31,7 @@ from bassi.core_v3.routes import (
     capability_routes,
     create_session_router,
     file_routes,
+    help_routes,
     settings,
 )
 from bassi.core_v3.services.agent_pool import get_agent_pool
@@ -261,6 +262,10 @@ class WebUIServerV3:
             capability_service=self.capability_service
         )
         self.app.include_router(capability_router)
+
+        # Help routes (enhanced help system for local ecosystem)
+        help_router = help_routes.create_help_router()
+        self.app.include_router(help_router)
 
         # Settings routes - register permission_manager for /permissions endpoint
         settings.set_permission_manager(self.permission_manager)

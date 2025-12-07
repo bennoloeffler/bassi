@@ -14,6 +14,178 @@
  * - Optimized for streaming UX
  */
 
+/**
+ * Show MCP info modal - explains what MCP servers are
+ */
+function showMcpInfoModal() {
+    // Remove existing modal if any
+    const existing = document.getElementById('mcp-info-modal')
+    if (existing) {
+        existing.remove()
+        return
+    }
+
+    // Create modal overlay
+    const overlay = document.createElement('div')
+    overlay.id = 'mcp-info-modal'
+    overlay.className = 'mcp-modal-overlay'
+    overlay.innerHTML = `
+        <div class="mcp-modal-content">
+            <div class="mcp-info-header">
+                <strong>Model Context Protocol (MCP)</strong>
+                <button class="mcp-info-close" onclick="document.getElementById('mcp-info-modal').remove()">&times;</button>
+            </div>
+            <p>MCP is an open standard by Anthropic that lets AI connect to external tools and data sources.</p>
+            <ul>
+                <li><strong>MCP Server</strong> - A program exposing tools (bash, database, APIs)</li>
+                <li><strong>MCP Client</strong> - The AI host that connects to servers</li>
+            </ul>
+            <p class="mcp-info-footer">This app uses MCP servers for shell commands, web search, MS365, and more.</p>
+            <a href="https://modelcontextprotocol.io/introduction" target="_blank" class="mcp-info-docs">📖 Official Documentation</a>
+        </div>
+    `
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove()
+        }
+    })
+
+    // Close on Escape key
+    const handleEscape = (e) => {
+        if (e.key === 'Escape') {
+            overlay.remove()
+            document.removeEventListener('keydown', handleEscape)
+        }
+    }
+    document.addEventListener('keydown', handleEscape)
+
+    document.body.appendChild(overlay)
+}
+
+/**
+ * Show example modal with REAL tool text for each concept type
+ */
+function showExampleModal(type) {
+    const existing = document.getElementById('example-info-modal')
+    if (existing) { existing.remove() }
+
+    const examples = {
+        mcp: {
+            title: '🔌 MCP Server Example',
+            subtitle: 'Reading emails from Microsoft 365',
+            userSays: '"Check my emails from TechStart GmbH"',
+            toolCall: `<pre class="tool-call"><code>mcp__ms365__list-mail-messages
+{
+  "search": "\\"from:techstart.de\\"",
+  "top": 10,
+  "select": ["subject", "from", "receivedDateTime"]
+}</code></pre>`,
+            explanation: 'The MCP server <code>ms365</code> provides tools like <code>list-mail-messages</code>, <code>send-mail</code>, <code>create-calendar-event</code>. I pick the right tool based on your request.'
+        },
+        command: {
+            title: '💻 Slash Command Example',
+            subtitle: 'Using /crm to manage CRM data',
+            userSays: '<code>/crm</code> Add contact Maria Schmidt, CTO at TechStart',
+            toolCall: `<pre class="tool-call"><code># The /crm command expands to a full workflow:
+1. Extract structured data (name, title, company)
+2. Check if company exists in CRM
+3. Load bel-crm-db skill for schema
+4. INSERT INTO person (name, job_title, ...)
+5. Confirm with record ID</code></pre>`,
+            explanation: 'Commands are <strong>explicit workflows</strong> you invoke by name. The <code>/crm</code> command is a template that guides data extraction and validation.'
+        },
+        skill: {
+            title: '🎯 Skill Auto-Loading Example',
+            subtitle: 'Skills load automatically via triggerwords',
+            userSays: '"Save this contact to my CRM database"',
+            toolCall: `<pre class="tool-call"><code># 1. Triggerword "CRM database" detected
+# 2. Auto-load skill: bel-crm-db
+
+# Skill provides schema knowledge:
+# - Tables: company_site, person, sales_opportunity, event
+# - Fields: name, email, phone, company_site_id, ...
+# - Relationships: person → company_site
+
+# 3. Now I can write correct SQL:
+mcp__postgresql__write_query
+{
+  "query": "INSERT INTO person (name, email, job_title, company_site_id) VALUES ('Maria Schmidt', 'maria@techstart.de', 'CTO', 42)"
+}</code></pre>`,
+            explanation: '<strong>Key difference from commands:</strong> Skills load <em>automatically</em> - you don\'t type <code>/skill-name</code>. Just describe what you want, and the right skill loads based on triggerwords in your message.'
+        },
+        agent: {
+            title: '🤖 Parallel Agent Example',
+            subtitle: 'Sub-agents with goals working in isolation',
+            userSays: '"Research TechStart - check their website and LinkedIn"',
+            toolCall: `<pre class="tool-call"><code># I spawn 2 parallel agents:
+
+Agent 1: {
+  goal: "You are a company researcher.
+         Extract key info from techstart.de:
+         - Products/services
+         - Team size indicators
+         - Recent news"
+}
+
+Agent 2: {
+  goal: "You are a LinkedIn analyst.
+         Find TechStart GmbH profile:
+         - Employee count
+         - Key people
+         - Company updates"
+}
+
+# Agents work in ISOLATED sub-contexts
+# Only their final summaries return to you</code></pre>`,
+            explanation: '<strong>Key properties:</strong><br>• <em>Parallel:</em> Multiple agents run simultaneously<br>• <em>Goals:</em> Each has "who you are + what\'s your goal"<br>• <em>Isolation:</em> Their full context stays private - only results come back'
+        }
+    }
+
+    const ex = examples[type]
+    if (!ex) return
+
+    const overlay = document.createElement('div')
+    overlay.id = 'example-info-modal'
+    overlay.className = 'mcp-modal-overlay'
+    overlay.innerHTML = `
+        <div class="mcp-modal-content example-modal">
+            <div class="mcp-info-header">
+                <strong>${ex.title}</strong>
+                <button class="mcp-info-close" onclick="document.getElementById('example-info-modal').remove()">&times;</button>
+            </div>
+            <p class="example-subtitle">${ex.subtitle}</p>
+            <div class="example-section">
+                <strong>You say:</strong> ${ex.userSays}
+            </div>
+            <div class="example-section">
+                <strong>What happens:</strong>
+                ${ex.toolCall}
+            </div>
+            <div class="example-explanation">
+                ${ex.explanation}
+            </div>
+        </div>
+    `
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove()
+    })
+
+    // Close on Escape key
+    const handleEscape = (e) => {
+        if (e.key === 'Escape') {
+            overlay.remove()
+            document.removeEventListener('keydown', handleEscape)
+        }
+    }
+    document.addEventListener('keydown', handleEscape)
+
+    document.body.appendChild(overlay)
+}
+
 class BassiWebClient {
     constructor() {
         // WebSocket connection
@@ -33,6 +205,10 @@ class BassiWebClient {
         this.isAgentWorking = false          // Track if agent is processing
         this.sessionCapabilities = null      // Capabilities from init system message
         this.sessionId = null                // Current session ID from WebSocket connection
+        this.helpItems = []                  // Parsed docs from .claude
+        this.helpItemsByType = {}            // Docs grouped by type
+        this.helpIndexByName = new Map()     // Quick lookup for docs by name
+        this.helpItemsLoaded = false         // Prevent duplicate fetches
 
         // Autocomplete state (supports both /commands and @files)
         this.commandRegistry = []            // All available commands
@@ -94,6 +270,18 @@ class BassiWebClient {
         this.connectionCountEl = document.getElementById('connection-count-value')
         this.connectionCountContainer = document.getElementById('connection-count')
         this.connectionCountInterval = null
+
+        // Responsive layout
+        this.mobileBreakpoint = 900
+        this.isMobileView = window.innerWidth <= this.mobileBreakpoint
+
+        // File preview overlay
+        this.filePreviewEl = null
+        this.filePreviewHideTimer = null
+        this.fileContextHintShown = false
+
+        // Simple timing helper for diagnostics
+        this.timers = new Map()
 
         this.init()
     }
@@ -185,6 +373,7 @@ class BassiWebClient {
 
         // Initialize file sidebar
         this.initFileSidebar()
+        this.initFilePreview()
 
         // PHASE 1: Eager capability loading - load in parallel on startup
         this.loadCapabilities().then(() => {
@@ -199,6 +388,10 @@ class BassiWebClient {
 
         // Start connection count polling
         this.startConnectionCountPolling()
+
+        // Responsive layout handling
+        window.addEventListener('resize', () => this.updateResponsiveLayout())
+        this.updateResponsiveLayout()
     }
 
     // ========== Connection Count Indicator ==========
@@ -235,6 +428,35 @@ class BassiWebClient {
         } catch (error) {
             // Silent fail - don't spam console
         }
+    }
+
+    // ========== Responsive Layout ==========
+
+    isMobileLayout() {
+        return window.innerWidth <= this.mobileBreakpoint
+    }
+
+    updateResponsiveLayout() {
+        const nowMobile = this.isMobileLayout()
+        const wasMobile = this.isMobileView
+
+        this.isMobileView = nowMobile
+        document.body.classList.toggle('mobile-layout', nowMobile)
+
+        // Reset drawers when entering mobile to avoid stacked panels
+        if (nowMobile && !wasMobile) {
+            this.closeFileSidebar()
+            this.closeSessionSidebar()
+        } else if (!nowMobile && wasMobile) {
+            document.body.classList.remove('mobile-drawer-open')
+        }
+
+        this.syncMobileDrawerState()
+    }
+
+    syncMobileDrawerState() {
+        const drawerOpen = this.isMobileLayout() && (this.sessionSidebarOpen || this.fileSidebarOpen)
+        document.body.classList.toggle('mobile-drawer-open', drawerOpen)
     }
 
     // ========== Session File Management ==========
@@ -950,7 +1172,8 @@ class BassiWebClient {
     selectFile(file) {
         // Insert @ref at the @ position, replacing what was typed
         const value = this.messageInput.value
-        const beforeAt = value.substring(0, this.fileAtPosition)
+        const atPos = Math.max(0, this.fileAtPosition)
+        const beforeAt = value.substring(0, atPos)
         const afterCursor = value.substring(this.messageInput.selectionStart)
 
         // Build the new value with @ref
@@ -963,6 +1186,11 @@ class BassiWebClient {
 
         this.hideAutocomplete()
         this.messageInput.focus()
+
+        // Refresh fileContext hint if we haven't surfaced it yet
+        if (!this.fileContextHintShown) {
+            this.addFileContextSystemMessage()
+        }
     }
 
     showCommandAutocomplete(query) {
@@ -1210,10 +1438,12 @@ class BassiWebClient {
             const escapedRefEscaped = escapedRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
             if (file) {
+                const displayPath = this.escapeHtml(this.getDisplayPath(file) || file.path || file.ref)
+                const href = file.path ? this.buildFileUrl(file.path) : '#'
                 // Valid reference - highlight in green
                 result = result.replace(
                     new RegExp(escapedRefEscaped),
-                    `<span class="file-ref valid" title="${this.escapeHtml(file.path || file.ref)}">${escapedRef}</span>`
+                    `<a class="file-ref valid" title="${displayPath}" href="${href || '#'}" target="_blank" rel="noopener noreferrer">${escapedRef}</a>`
                 )
             } else {
                 // Invalid reference - highlight in red
@@ -1342,12 +1572,45 @@ class BassiWebClient {
 
     sendMessage() {
         const content = this.messageInput.value.trim()
-        if (!content || !this.isConnected) return
+        if (!content) return
 
         const lowerContent = content.toLowerCase()
 
+        // Allow local help/meta commands even if disconnected
+        const localOnlyCommands = new Set([
+            'help',
+            '/help',
+            '/help-enhanced',
+            '/agents',
+            '/skills',
+            '/commands',
+            '/tools',
+            '/permissions',
+            '/clear',
+        ])
+
+        if (!this.isConnected && !localOnlyCommands.has(lowerContent)) {
+            return
+        }
+
+        if (lowerContent === 'help') {
+            this.addUserMessage(content)
+            this.showQuickHelp()
+            this.messageInput.value = ''
+            this.messageInput.style.height = 'auto'
+            return
+        }
+
         // Intercept meta-commands (handle locally, don't send to server)
         if (lowerContent === '/help') {
+            this.addUserMessage(content)
+            this.showDynamicHelp()
+            this.messageInput.value = ''
+            this.messageInput.style.height = 'auto'
+            return
+        }
+
+        if (lowerContent === '/help-enhanced') {
             this.addUserMessage(content)
             this.showDynamicHelp()
             this.messageInput.value = ''
@@ -1408,12 +1671,21 @@ class BassiWebClient {
 
         // Build content blocks (multimodal support)
         const contentBlocks = []
+        const fileContextHint = this.buildFileContextHint()
 
         // Add text if present
         if (content) {
             contentBlocks.push({
                 type: 'text',
                 text: content
+            })
+        }
+
+        // Append file context hint so the agent always knows available uploads
+        if (fileContextHint) {
+            contentBlocks.push({
+                type: 'text',
+                text: fileContextHint
             })
         }
 
@@ -2078,19 +2350,21 @@ class BassiWebClient {
         setTimeout(() => this.forceScrollToBottom(), 350)
     }
 
-    addSystemMessage(message, temporary = false) {
+    addSystemMessage(message, temporary = false, options = {}) {
         // PHASE 2: Helper for system/loading messages
         const messageEl = document.createElement('div')
         messageEl.className = 'system-message message-fade-in'
         if (temporary) {
             messageEl.dataset.temporary = 'true'
         }
+        const allowHtml = options.allowHtml === true
+        const content = allowHtml ? message : this.escapeHtml(message)
         messageEl.innerHTML = `
             <div class="system-header">
                 <span class="system-icon">ℹ️</span>
                 <span class="system-title">System</span>
             </div>
-            <div class="system-content">${this.escapeHtml(message)}</div>
+            <div class="system-content">${content}</div>
         `
         this.conversationEl.appendChild(messageEl)
 
@@ -2276,21 +2550,21 @@ class BassiWebClient {
 
                 <div class="welcome-content">
                     <p class="welcome-description">
-                        Powered by <strong>Claude</strong>, I can do almost everything on your computer, the web and office 365.
+                        Powered by <strong>Claude</strong>, I can do almost everything on your computer, the web and office 365 and other tools connected via MCP.
                     </p>
 
                     <div class="welcome-quick-start">
                         <div class="quick-start-item">
                             <span class="qs-icon">💬</span>
-                            <span class="qs-text">Ask me anything</span>
+                            <span class="qs-text">Tell me what to do... I find out how to do it!</span>
                         </div>
                         <div class="quick-start-item">
                             <span class="qs-icon">📝</span>
-                            <span class="qs-text">Type <code>/help</code> for capabilities</span>
+                            <span class="qs-text">Type <code>help</code> for general help and <code>/help</code> for capabilities</span>
                         </div>
                         <div class="quick-start-item">
                             <span class="qs-icon">⚙️</span>
-                            <span class="qs-text">Driven by MCP servers</span>
+                            <span class="qs-text">Driven by MCP servers (<a href="#" class="mcp-info-link" onclick="event.preventDefault(); showMcpInfoModal()">what is an mcp server?</a>)</span>
                         </div>
                     </div>
                 </div>
@@ -2314,6 +2588,7 @@ class BassiWebClient {
          * Capabilities are lazily loaded on first /help command
          * and cached in memory for subsequent requests.
          */
+        this.startTimer('capabilities_fetch')
         console.log('📡 Fetching capabilities from /api/capabilities...')
 
         try {
@@ -2328,26 +2603,279 @@ class BassiWebClient {
             // Make globally accessible for debugging
             window.bassiCapabilities = this.sessionCapabilities
 
+            const duration = this.endTimer('capabilities_fetch')
             console.log('✅ Capabilities loaded:', {
                 tools: this.sessionCapabilities.tools?.length,
                 mcp_servers: this.sessionCapabilities.mcp_servers?.length,
                 slash_commands: this.sessionCapabilities.slash_commands?.length,
                 skills: this.sessionCapabilities.skills?.length,
-                agents: this.sessionCapabilities.agents?.length
+                agents: this.sessionCapabilities.agents?.length,
+                duration_ms: duration
             })
         } catch (error) {
+            this.endTimer('capabilities_fetch')
             console.error('❌ Failed to load capabilities:', error)
             this.sessionCapabilities = null
         }
     }
 
-    async showDynamicHelp() {
-        // Lazy load capabilities if not already loaded
-        if (!this.sessionCapabilities) {
-            await this.loadCapabilities()
+    async loadHelpIndex() {
+        if (this.helpItemsLoaded) {
+            return this.helpItems
         }
 
+        this.startTimer('help_index_fetch')
+        try {
+            const response = await fetch('/api/help?query=overview')
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+            }
+
+            const data = await response.json()
+            this.helpItems = data.items || []
+            this.helpItemsByType = data.items_by_type || {}
+            this.helpIndexByName = new Map()
+
+            this.helpItems.forEach((item) => {
+                const key = this.normalizeHelpKey(item.name)
+                this.helpIndexByName.set(key, item)
+                // Support slash-prefixed lookups for commands
+                this.helpIndexByName.set(`/${key}`, item)
+            })
+
+            const duration = this.endTimer('help_index_fetch')
+            console.log('✅ Help index loaded:', {
+                items: this.helpItems.length,
+                commands: this.helpItemsByType.command?.length || 0,
+                skills: this.helpItemsByType.skill?.length || 0,
+                agents: this.helpItemsByType.agent?.length || 0,
+                duration_ms: duration
+            })
+        } catch (error) {
+            this.endTimer('help_index_fetch')
+            console.error('❌ Failed to load help index:', error)
+            this.helpItems = []
+            this.helpItemsByType = {}
+            this.helpIndexByName = new Map()
+        } finally {
+            this.helpItemsLoaded = true
+        }
+
+        return this.helpItems
+    }
+
+    async showQuickHelp() {
+        // Load capability + doc data so we can render dynamic counts
+        const capPromise = this.sessionCapabilities ? Promise.resolve(this.sessionCapabilities) : this.loadCapabilities()
+        const helpPromise = this.helpItemsLoaded ? Promise.resolve(this.helpItems) : this.loadHelpIndex()
+        await Promise.all([capPromise, helpPromise])
+
+        const caps = this.sessionCapabilities || {}
+        const mcpServers = caps.mcp_servers || []
+        const slashCommands = (caps.slash_commands || []).map((c) => typeof c === 'string' ? c : c.name).filter(Boolean)
+        const skills = (caps.skills || []).map((s) => typeof s === 'string' ? s : s.name || s).filter(Boolean)
+        const agents = (caps.agents || []).map((a) => typeof a === 'string' ? a : a.name || a).filter(Boolean)
+
+        const skillBadges = skills.slice(0, 15).map((skill) => `<span class="skill-badge">${this.escapeHtml(skill)}</span>`).join(' ')
+        const agentBadges = agents.slice(0, 15).map((agent) => `<span class="agent-badge">${this.escapeHtml(agent)}</span>`).join(' ')
+        const commandBoxes = slashCommands.length
+            ? slashCommands.slice(0, 15).map((cmd) => `
+                <div class="command-box">
+                    <h4 class="command-name">/${this.escapeHtml(cmd)}</h4>
+                    <p class="command-desc">Pre-defined workflow</p>
+                    <div class="command-example">
+                        <strong>Example:</strong> <code>/${this.escapeHtml(cmd)} ...</code>
+                    </div>
+                </div>
+            `).join('')
+            : '<p>No commands discovered.</p>'
+
+        const mcpBoxes = mcpServers.length
+            ? mcpServers.slice(0, 6).map((server) => `
+                <div class="mcp-box">
+                    <h3 class="mcp-name">${this.escapeHtml(server.name || 'MCP Server')}</h3>
+                    <p class="mcp-desc">${this.escapeHtml(server.description || 'Model Context Protocol server')}</p>
+                    <div class="mcp-tools"><strong>Status:</strong> ${this.escapeHtml(server.status || 'configured')}</div>
+                    ${server.models ? `<div class="mcp-example"><strong>Models:</strong> ${this.escapeHtml(server.models.join(', '))}</div>` : ''}
+                </div>
+            `).join('')
+            : '<p>No MCP servers configured.</p>'
+
+        const skillBoxes = skills.length
+            ? skills.slice(0, 15).map((skill) => `
+                <div class="skill-box">
+                    <h4 class="skill-name">${this.escapeHtml(skill)}</h4>
+                    <p class="skill-desc">Skill (auto-loaded when needed)</p>
+                    <div class="skill-usage"><strong>Automatically used:</strong> when relevant</div>
+                </div>
+            `).join('')
+            : '<p>No skills discovered.</p>'
+
+        const helpEl = document.createElement('div')
+        helpEl.className = 'assistant-message message-fade-in'
+        helpEl.innerHTML = `
+            <div class="message-header">
+                <span class="assistant-icon">📘</span>
+                <span class="assistant-name">Help</span>
+            </div>
+            <div class="message-content">
+                <div class="help-container">
+                    <h1>🎯 Bassi Help Guide</h1>
+
+                    <div class="help-intro">
+                        <p>I can plan tasks, edit code, run tools, and keep state across turns. Here’s how my toolbox is organized.</p>
+                        <p><strong>Counts:</strong> ${agents.length} agents • ${skills.length} skills • ${slashCommands.length} commands • ${mcpServers.length} MCP servers</p>
+                        <p>Want the exhaustive list? Type <code>/help</code> for the full catalog with click-to-expand details.</p>
+                    </div>
+
+                    <div class="help-section">
+                        <h2>📚 Understanding the Different Types</h2>
+
+                        <div class="concept-box">
+                            <h3>🔌 MCP Servers (Model Context Protocol)</h3>
+                            <p><strong>What:</strong> External services that provide specialized tools and data access.</p>
+                            <p><strong>When:</strong> Whenever you need to access external systems - databases, email, web.</p>
+                            <p><strong>How:</strong> Ask naturally; I call the right MCP tool automatically.</p>
+                            <div class="concept-example">
+                                <strong>Example:</strong> <em>"Check my emails from today"</em>
+                                <a href="#" class="example-link" onclick="event.preventDefault(); showExampleModal('mcp')">→ see tool call</a>
+                            </div>
+                        </div>
+
+                        <div class="concept-box">
+                            <h3>💻 Slash Commands</h3>
+                            <p><strong>What:</strong> Explicit workflows you invoke by name - full prompt templates with instructions.</p>
+                            <p><strong>When:</strong> Complex multi-step processes where you want a specific guided workflow.</p>
+                            <p><strong>How:</strong> Type <code>/command-name</code> to explicitly invoke the workflow.</p>
+                            <div class="concept-example">
+                                <strong>Example:</strong> <code>/crm</code> with your data
+                                <a href="#" class="example-link" onclick="event.preventDefault(); showExampleModal('command')">→ see how it works</a>
+                            </div>
+                        </div>
+
+                        <div class="concept-box">
+                            <h3>🎯 Skills</h3>
+                            <p><strong>What:</strong> Knowledge bundles with schemas, templates, and how-to guides that load automatically.</p>
+                            <p><strong>When:</strong> Working with specific domains (CRM, PDF, XLSX). Only triggerwords are loaded initially - full content loads on demand.</p>
+                            <p><strong>How:</strong> Just describe what you want - <strong>I detect and load the right skill automatically.</strong></p>
+                            <div class="concept-example">
+                                <strong>Example:</strong> <em>"Save this contact to the CRM database"</em>
+                                <a href="#" class="example-link" onclick="event.preventDefault(); showExampleModal('skill')">→ see auto-loading</a>
+                            </div>
+                        </div>
+
+                        <div class="concept-box">
+                            <h3>🤖 Agents (Sub-agents)</h3>
+                            <p><strong>What:</strong> Parallel AI workers with specific goals. They work in isolated sub-contexts - only results come back.</p>
+                            <p><strong>When:</strong> Complex tasks that benefit from parallel execution or specialized focus (code review, testing, research).</p>
+                            <p><strong>How:</strong> I spawn them as needed. Each agent has a goal ("who are you and what's your goal").</p>
+                            <div class="concept-example">
+                                <strong>Example:</strong> <em>"Review these 5 files for security issues"</em>
+                                <a href="#" class="example-link" onclick="event.preventDefault(); showExampleModal('agent')">→ see parallel agents</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="help-section">
+                        <h2>📡 MCP Servers (${mcpServers.length})</h2>
+                        ${mcpBoxes}
+                    </div>
+
+                    <div class="help-section">
+                        <h2>💻 Slash Commands (${slashCommands.length})</h2>
+                        ${commandBoxes}
+                    </div>
+
+                    <div class="help-section">
+                        <h2>🎯 Skills (${skills.length})</h2>
+                        ${skillBoxes}
+                    </div>
+
+                    <div class="help-section">
+                        <h2>💡 Quick Start Examples</h2>
+
+                        <div class="example-box cohesive-example">
+                            <h3>🎬 Complete Scenario: All 4 Types Working Together</h3>
+                            <p class="scenario-intro"><em>Scenario: You want to add a new lead from an email to your CRM and research their company.</em></p>
+
+                            <div class="scenario-step">
+                                <span class="step-badge mcp">MCP</span>
+                                <p><strong>You:</strong> "Check my emails for messages from TechStart GmbH"</p>
+                                <p class="step-what">→ I call <code>mcp__ms365__list-mail-messages</code> with search filter</p>
+                            </div>
+
+                            <div class="scenario-step">
+                                <span class="step-badge skill">Skill</span>
+                                <p><strong>You:</strong> "Save Maria Schmidt (maria@techstart.de, CTO) to the CRM"</p>
+                                <p class="step-what">→ I auto-load <code>bel-crm-db</code> skill (has the schema), then call <code>mcp__postgresql__write_query</code></p>
+                            </div>
+
+                            <div class="scenario-step">
+                                <span class="step-badge agent">Agent</span>
+                                <p><strong>You:</strong> "Research TechStart GmbH - check their website and LinkedIn"</p>
+                                <p class="step-what">→ I spawn 2 parallel agents: one for website, one for LinkedIn. Each has a goal, works in isolation, returns summary.</p>
+                            </div>
+
+                            <div class="scenario-step">
+                                <span class="step-badge command">Command</span>
+                                <p><strong>You:</strong> <code>/crm Update TechStart with: industry=SaaS, size=50-100 employees</code></p>
+                                <p class="step-what">→ The /crm command workflow guides the update, validates data, uses skill+MCP internally.</p>
+                            </div>
+                        </div>
+
+                        <div class="example-box">
+                            <h3>Skill Auto-Loading (No Command Needed)</h3>
+                            <p><strong>You type:</strong> "Save this contact to my CRM database"</p>
+                            <p><strong>What happens:</strong></p>
+                            <ol>
+                                <li>I detect "CRM database" → auto-load <code>bel-crm-db</code> skill</li>
+                                <li>Skill provides schema: tables, fields, relationships</li>
+                                <li>I call <code>mcp__postgresql__write_query</code> with correct SQL</li>
+                            </ol>
+                            <p class="key-insight">💡 <strong>Key:</strong> Skills load automatically via triggerwords. No <code>/command</code> needed!</p>
+                        </div>
+
+                        <div class="example-box">
+                            <h3>Parallel Agents (Independent Workers)</h3>
+                            <p><strong>You type:</strong> "Review these 3 Python files for bugs"</p>
+                            <p><strong>What happens:</strong></p>
+                            <ol>
+                                <li>I spawn 3 agents in parallel - one per file</li>
+                                <li>Each agent has a goal: "You are a code reviewer. Find bugs in [file]."</li>
+                                <li>Agents work in isolation - their full context stays private</li>
+                                <li>Only the final results come back to you</li>
+                            </ol>
+                            <p class="key-insight">💡 <strong>Key:</strong> Agents run in parallel, have goals, return only results.</p>
+                        </div>
+                    </div>
+
+                    <div class="help-footer">
+                        <h3>🚀 Pro Tips</h3>
+                        <ul>
+                            <li>Ask naturally; I pick tools/agents for you.</li>
+                            <li>Mix and match: commands can trigger skills and MCP servers.</li>
+                            <li>Type <code>/help</code> anytime to see the full interactive catalog.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        `
+
+        this.conversationEl.appendChild(helpEl)
+        this.scrollToBottom()
+    }
+
+    async showDynamicHelp() {
+        this.startTimer('show_dynamic_help')
+        // Lazy load capabilities + help index in parallel
+        const capPromise = this.sessionCapabilities ? Promise.resolve(this.sessionCapabilities) : this.loadCapabilities()
+        const helpPromise = this.helpItemsLoaded ? Promise.resolve(this.helpItems) : this.loadHelpIndex()
+
+        await Promise.all([capPromise, helpPromise])
+
         if (!this.sessionCapabilities) {
+            this.endTimer('show_dynamic_help')
             // Still not loaded after fetch - show error
             const helpEl = document.createElement('div')
             helpEl.className = 'assistant-message message-fade-in'
@@ -2368,6 +2896,8 @@ class BassiWebClient {
         }
 
         const caps = this.sessionCapabilities
+
+        const docsAvailable = Array.isArray(this.helpItems) && this.helpItems.length > 0
 
         // Safely extract arrays with defaults
         const tools = caps.tools || []
@@ -2403,6 +2933,7 @@ class BassiWebClient {
             <div class="message-content">
                 <div class="help-content">
                     <h2>Bassi V3 - Available Capabilities</h2>
+                    <p>Click any item to view details${docsAvailable ? ' with docs sourced from your .claude folder.' : '.'}</p>
 
                     <div class="help-section">
                         <h3>📡 MCP Servers (${mcpServers.length})</h3>
@@ -2455,9 +2986,14 @@ class BassiWebClient {
                                 if (cmdName.startsWith('/')) {
                                     cmdName = cmdName.substring(1)
                                 }
+                                const doc = this.getHelpItem(cmdName)
+                                const description = doc?.description || (typeof c === 'object' ? c.description : '')
+                                const title = description
+                                    ? this.escapeHtml(description)
+                                    : 'Click for details'
                                 return `<code class="command-tag clickable"
                                              data-command="${cmdName}"
-                                             title="Click for details">/${cmdName}</code>`
+                                             title="${title}">/${cmdName}</code>`
                             }).join(' ')}
                         </div>
                     </div>
@@ -2467,9 +3003,11 @@ class BassiWebClient {
                         <div class="skills-list">
                             ${skills.map(s => {
                                 const skillName = typeof s === 'string' ? s : s.name || s
+                                const doc = this.getHelpItem(skillName)
+                                const description = doc?.description || ''
                                 return `<span class="skill-badge clickable"
                                               data-skill="${skillName}"
-                                              title="Click for details">${skillName}</span>`
+                                              title="${description ? this.escapeHtml(description) : 'Click for details'}">${skillName}</span>`
                             }).join(' ')}
                         </div>
                     </div>
@@ -2479,9 +3017,11 @@ class BassiWebClient {
                         <div class="agents-list">
                             ${agents.map(a => {
                                 const agentName = typeof a === 'string' ? a : a.name || a
+                                const doc = this.getHelpItem(agentName)
+                                const description = doc?.description || ''
                                 return `<span class="agent-badge clickable"
                                               data-agent="${agentName}"
-                                              title="Click for details">${agentName}</span>`
+                                              title="${description ? this.escapeHtml(description) : 'Click for details'}">${agentName}</span>`
                             }).join(' ')}
                         </div>
                     </div>
@@ -2525,6 +3065,14 @@ class BassiWebClient {
         })
 
         this.scrollToBottom()
+        this.endTimer('show_dynamic_help', {
+            tools: tools.length,
+            mcp_servers: mcpServers.length,
+            slash_commands: slashCommands.length,
+            skills: skills.length,
+            agents: agents.length,
+            docs_available: docsAvailable,
+        })
     }
 
     async showAgents() {
@@ -3007,40 +3555,122 @@ class BassiWebClient {
         `
     }
 
-    showCommandDetails(cmdName) {
-        // Find command in capabilities
-        const caps = this.sessionCapabilities
-        if (!caps || !caps.slash_commands) return
+    normalizeHelpKey(name) {
+        if (!name) return ''
+        return name.toString().toLowerCase().replace(/^\//, '').trim()
+    }
 
-        const command = caps.slash_commands.find(c =>
-            (typeof c === 'string' ? c : c.name) === cmdName
+    getHelpItem(name) {
+        const key = this.normalizeHelpKey(name)
+        if (!key) return null
+
+        if (this.helpIndexByName?.has(key)) {
+            return this.helpIndexByName.get(key)
+        }
+
+        if (Array.isArray(this.helpItems) && this.helpItems.length > 0) {
+            const directMatch = this.helpItems.find(
+                (item) => this.normalizeHelpKey(item.name) === key
+            )
+            if (directMatch) {
+                this.helpIndexByName.set(key, directMatch)
+                this.helpIndexByName.set(`/${key}`, directMatch)
+                return directMatch
+            }
+        }
+
+        return null
+    }
+
+    buildHelpDetailHtml(helpItem, fallbackDescription = '', label = 'item') {
+        const sections = []
+        const description = helpItem?.description || fallbackDescription
+
+        if (description) {
+            sections.push(`<p>${this.escapeHtml(description)}</p>`)
+        }
+
+        if (helpItem?.file_path) {
+            sections.push(`<p><strong>Source:</strong> ${this.escapeHtml(helpItem.file_path)}</p>`)
+        }
+
+        const addListSection = (title, items) => {
+            if (items && items.length) {
+                sections.push(`
+                    <div class="help-subsection">
+                        <h4>${title}</h4>
+                        <ul>${items.map(item => `<li>${this.escapeHtml(item)}</li>`).join('')}</ul>
+                    </div>
+                `)
+            }
+        }
+
+        addListSection('Capabilities', helpItem?.capabilities)
+        addListSection('When to use', helpItem?.when_to_use)
+        addListSection('Examples', helpItem?.examples)
+        addListSection('Related', helpItem?.related_items)
+
+        if (helpItem?.metadata) {
+            const metadataEntries = Object.entries(helpItem.metadata)
+                .filter(([key, value]) => value && key !== 'description' && key !== 'name')
+            if (metadataEntries.length) {
+                sections.push(`
+                    <div class="help-subsection">
+                        <h4>Metadata</h4>
+                        <ul>${metadataEntries.map(([key, value]) => `<li><strong>${this.escapeHtml(key)}:</strong> ${this.escapeHtml(String(value))}</li>`).join('')}</ul>
+                    </div>
+                `)
+            }
+        }
+
+        if (helpItem?.raw_content) {
+            sections.push(`
+                <details class="help-subsection">
+                    <summary>View full definition</summary>
+                    <pre>${this.escapeHtml(helpItem.raw_content)}</pre>
+                </details>
+            `)
+        }
+
+        if (sections.length === 0) {
+            return `<p><em>No documentation found for this ${this.escapeHtml(label)}.</em></p>`
+        }
+
+        return sections.join('\n')
+    }
+
+    async showCommandDetails(cmdName) {
+        const normalizedName = this.normalizeHelpKey(cmdName)
+
+        if (!this.helpItemsLoaded) {
+            await this.loadHelpIndex()
+        }
+
+        const caps = this.sessionCapabilities
+        const command = caps?.slash_commands?.find(c =>
+            this.normalizeHelpKey(typeof c === 'string' ? c : c.name) === normalizedName
         )
+
+        const helpItem = this.getHelpItem(normalizedName)
+        const fallbackDescription = (command && typeof command === 'object' && command.description) ? command.description : ''
 
         const modal = document.createElement('div')
         modal.className = 'tool-modal-overlay'
 
-        let description = '<p><em>No description available</em></p>'
-        let argumentHint = ''
-
-        if (command && typeof command === 'object') {
-            description = `<p>${command.description || 'No description available'}</p>`
-            if (command.argumentHint) {
-                argumentHint = `<p><strong>Arguments:</strong> <code>${command.argumentHint}</code></p>`
-            }
-        }
+        const argumentHint = (command && typeof command === 'object' && command.argumentHint)
+            ? `<p><strong>Arguments:</strong> <code>${this.escapeHtml(command.argumentHint)}</code></p>`
+            : ''
 
         modal.innerHTML = `
             <div class="tool-modal">
                 <div class="tool-modal-header">
-                    <h3>💻 /${cmdName}</h3>
+                    <h3>💻 /${this.escapeHtml(normalizedName)}</h3>
                     <button class="tool-modal-close">&times;</button>
                 </div>
                 <div class="tool-modal-body">
                     <p><strong>Type:</strong> Slash Command</p>
                     ${argumentHint}
-                    <div class="tool-description">
-                        ${description}
-                    </div>
+                    ${this.buildHelpDetailHtml(helpItem, fallbackDescription, 'command')}
                 </div>
             </div>
         `
@@ -3048,22 +3678,25 @@ class BassiWebClient {
         this.showModal(modal)
     }
 
-    showSkillDetails(skillName) {
+    async showSkillDetails(skillName) {
+        if (!this.helpItemsLoaded) {
+            await this.loadHelpIndex()
+        }
+
+        const helpItem = this.getHelpItem(skillName)
+
         const modal = document.createElement('div')
         modal.className = 'tool-modal-overlay'
 
         modal.innerHTML = `
             <div class="tool-modal">
                 <div class="tool-modal-header">
-                    <h3>🎯 ${skillName}</h3>
+                    <h3>🎯 ${this.escapeHtml(skillName)}</h3>
                     <button class="tool-modal-close">&times;</button>
                 </div>
                 <div class="tool-modal-body">
                     <p><strong>Type:</strong> Skill (Claude Code Plugin)</p>
-                    <div class="tool-description">
-                        <p><em>Skill descriptions are loaded from SKILL.md files but not exposed via the Agent SDK.</em></p>
-                        <p>Skills are automatically loaded when needed - you don't need to call them directly.</p>
-                    </div>
+                    ${this.buildHelpDetailHtml(helpItem, '', 'skill')}
                 </div>
             </div>
         `
@@ -3071,23 +3704,25 @@ class BassiWebClient {
         this.showModal(modal)
     }
 
-    showAgentDetails(agentName) {
+    async showAgentDetails(agentName) {
+        if (!this.helpItemsLoaded) {
+            await this.loadHelpIndex()
+        }
+
+        const helpItem = this.getHelpItem(agentName)
+
         const modal = document.createElement('div')
         modal.className = 'tool-modal-overlay'
 
         modal.innerHTML = `
             <div class="tool-modal">
                 <div class="tool-modal-header">
-                    <h3>🤖 ${agentName}</h3>
+                    <h3>🤖 ${this.escapeHtml(agentName)}</h3>
                     <button class="tool-modal-close">&times;</button>
                 </div>
                 <div class="tool-modal-body">
                     <p><strong>Type:</strong> Agent</p>
-                    <div class="tool-description">
-                        <p><em>Agent descriptions are not provided by the Agent SDK.</em></p>
-                        <p>Agents are specialized sub-processes for complex, multi-step tasks.</p>
-                        <p>Use the Task tool to launch agents when needed for your work.</p>
-                    </div>
+                    ${this.buildHelpDetailHtml(helpItem, '', 'agent')}
                 </div>
             </div>
         `
@@ -3630,8 +4265,23 @@ class BassiWebClient {
 
     escapeHtml(text) {
         const div = document.createElement('div')
-        div.textContent = text
+        div.textContent = text == null ? '' : text
         return div.innerHTML
+    }
+
+    startTimer(name) {
+        this.timers.set(name, performance.now())
+    }
+
+    endTimer(name, extra = {}) {
+        const start = this.timers.get(name)
+        if (start) {
+            const duration = Math.round(performance.now() - start)
+            console.log(`⏱️ ${name} finished in ${duration}ms`, extra)
+            this.timers.delete(name)
+            return duration
+        }
+        return null
     }
 
     formatMarkdown(text) {
@@ -4200,6 +4850,19 @@ class BassiWebClient {
             })
         }
 
+        // Close session drawer when tapping outside on mobile
+        document.addEventListener('click', (e) => {
+            if (
+                this.sessionSidebarOpen &&
+                this.isMobileLayout() &&
+                !this.sessionSidebar.contains(e.target) &&
+                !this.sessionSidebarToggle.contains(e.target) &&
+                !(this.newSessionButton && this.newSessionButton.contains(e.target))
+            ) {
+                this.closeSessionSidebar()
+            }
+        })
+
         // Load sessions on init
         this.loadSessions()
 
@@ -4210,6 +4873,10 @@ class BassiWebClient {
         /**
          * Toggle session sidebar open/close state.
          */
+        if (this.isMobileLayout() && this.fileSidebarOpen) {
+            this.closeFileSidebar()
+        }
+
         this.sessionSidebarOpen = !this.sessionSidebarOpen
         this.updateSessionSidebarState()
     }
@@ -4239,6 +4906,8 @@ class BassiWebClient {
             this.sessionSidebarControls?.classList.remove('open')
             document.body.classList.remove('sidebar-open')
         }
+
+        this.syncMobileDrawerState()
     }
 
     async loadSessions() {
@@ -4443,6 +5112,7 @@ class BassiWebClient {
         this.blocks.clear()
         this.textBuffers.clear()
         this.sessionFiles = []
+        this.fileContextHintShown = false
         this.messageInput.value = ''  // Clear input field
         this.renderFileSidebar()  // Update file sidebar to show empty state
 
@@ -4663,7 +5333,7 @@ class BassiWebClient {
         // Close sidebar when clicking outside on mobile
         document.addEventListener('click', (e) => {
             if (this.fileSidebarOpen &&
-                window.innerWidth <= 768 &&
+                this.isMobileLayout() &&
                 !this.fileSidebar.contains(e.target) &&
                 !this.fileSidebarToggle.contains(e.target)) {
                 this.closeFileSidebar()
@@ -4680,6 +5350,10 @@ class BassiWebClient {
         /**
          * Toggle file sidebar open/close state.
          */
+        if (this.isMobileLayout() && this.sessionSidebarOpen) {
+            this.closeSessionSidebar()
+        }
+
         this.fileSidebarOpen = !this.fileSidebarOpen
         this.updateFileSidebarState()
     }
@@ -4698,6 +5372,8 @@ class BassiWebClient {
         /**
          * Update file sidebar UI based on open/close state.
          */
+        if (!this.fileSidebar) return
+
         if (this.fileSidebarOpen) {
             this.fileSidebar.classList.add('open')
             this.fileSidebarControls?.classList.add('open')
@@ -4706,7 +5382,10 @@ class BassiWebClient {
             this.fileSidebar.classList.remove('open')
             this.fileSidebarControls?.classList.remove('open')
             document.body.classList.remove('file-sidebar-open')
+            this.scheduleHideFilePreview()
         }
+
+        this.syncMobileDrawerState()
     }
 
     renderFileSidebar() {
@@ -4727,6 +5406,7 @@ class BassiWebClient {
                     <span>Upload files or drag & drop</span>
                 </div>
             `
+            this.fileContextHintShown = false
             this.updateFileSidebarStats()
             return
         }
@@ -4734,16 +5414,18 @@ class BassiWebClient {
         // Render file items
         const fileItems = this.sessionFiles.map(file => {
             const fileSize = this.formatFileSize(file.size || 0)
-            const isImage = file.file_type === 'image'
-            const isPdf = file.file_type === 'pdf'
+            const isImage = file.file_type === 'image' || file.type === 'image' || (file.mime_type && file.mime_type.startsWith('image/'))
+            const isPdf = file.file_type === 'pdf' || file.type === 'pdf' || (file.mime_type === 'application/pdf')
+            const previewUrl = isImage ? this.getFilePreviewUrl(file) : null
+            const fullPath = this.getDisplayPath(file)
 
             // Show thumbnail for images, icon for others
             let iconContent
-            if (isImage && file.data) {
-                const mimeType = file.mime_type || 'image/png'
-                iconContent = `<img class="file-sidebar-item-thumbnail" src="data:${mimeType};base64,${file.data}" alt="${file.ref}">`
+            if (isImage && previewUrl) {
+                iconContent = `<img class="file-sidebar-item-thumbnail" src="${previewUrl}" alt="${file.ref}">`
             } else {
-                const fileIcon = this.getFileIcon(file.file_type || 'unknown')
+                const iconKey = file.file_type || file.type || 'unknown'
+                const fileIcon = this.getFileIcon(iconKey)
                 iconContent = `<span class="file-sidebar-item-emoji">${fileIcon}</span>`
             }
 
@@ -4752,11 +5434,12 @@ class BassiWebClient {
                               isImage ? '<span class="file-type-badge image">IMG</span>' : ''
 
             return `
-                <div class="file-sidebar-item ${isImage ? 'has-thumbnail' : ''}" data-ref="${file.ref}" title="${file.path || file.ref}">
+                <div class="file-sidebar-item ${isImage ? 'has-thumbnail' : ''}" data-ref="${file.ref}" title="${fullPath}">
                     <div class="file-sidebar-item-icon">${iconContent}</div>
                     <div class="file-sidebar-item-info">
                         <span class="file-sidebar-item-name">@${file.ref}</span>
                         <span class="file-sidebar-item-meta">${fileSize} ${typeBadge}</span>
+                        <span class="file-sidebar-item-path">${fullPath}</span>
                     </div>
                     <button class="file-sidebar-item-delete" data-ref="${file.ref}" title="Remove file">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4791,6 +5474,22 @@ class BassiWebClient {
             }
         })
 
+        // Add hover preview handlers (desktop only)
+        this.fileSidebarList.querySelectorAll('.file-sidebar-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                if (this.isMobileLayout()) return
+                const ref = item.dataset.ref
+                const file = this.sessionFiles.find(f => f.ref === ref)
+                if (file) {
+                    this.showFilePreview(file, item)
+                }
+            })
+            item.addEventListener('mouseleave', () => {
+                if (this.isMobileLayout()) return
+                this.scheduleHideFilePreview()
+            })
+        })
+
         this.updateFileSidebarStats()
     }
 
@@ -4815,8 +5514,12 @@ class BassiWebClient {
         input.focus()
 
         // Close sidebar on mobile
-        if (window.innerWidth <= 768) {
+        if (this.isMobileLayout()) {
             this.closeFileSidebar()
+        }
+
+        if (!this.fileContextHintShown) {
+            this.addFileContextSystemMessage()
         }
     }
 
@@ -4853,6 +5556,11 @@ class BassiWebClient {
 
         // Update badge on toggle button
         this.updateFileSidebarBadge(fileCount)
+
+        // Show context hint when files exist
+        if (fileCount > 0 && !this.fileContextHintShown) {
+            this.addFileContextSystemMessage()
+        }
     }
 
     updateFileSidebarBadge(count) {
@@ -4871,9 +5579,177 @@ class BassiWebClient {
             }
             badge.textContent = count > 99 ? '99+' : count
             badge.style.display = 'flex'
+            badge.setAttribute('aria-label', `${count} file${count !== 1 ? 's' : ''} available`)
         } else if (badge) {
             badge.style.display = 'none'
         }
+    }
+
+    buildFileUrl(path) {
+        /**
+         * Build a safe URL for fetching a file from the current session.
+         */
+        if (!this.sessionId || !path) return null
+
+        // Allow absolute URLs (e.g., remote sources) to pass through
+        if (typeof path === 'string' && (path.startsWith('http://') || path.startsWith('https://'))) {
+            return path
+        }
+
+        const encodedPath = path
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/')
+
+        return `/api/sessions/${encodeURIComponent(this.sessionId)}/file/${encodedPath}`
+    }
+
+    getFilePreviewUrl(file) {
+        /**
+         * Resolve an image preview URL using thumbnail, inline data, or session file endpoint.
+         */
+        if (!file) return null
+
+        if (file.preview_url) {
+            return file.preview_url
+        }
+
+        // Prefer explicit thumbnail from registry if present
+        if (file.thumbnail) {
+            const alreadyDataUri = typeof file.thumbnail === 'string' && file.thumbnail.startsWith('data:')
+            const mime = file.mime_type || 'image/png'
+            return alreadyDataUri ? file.thumbnail : `data:${mime};base64,${file.thumbnail}`
+        }
+
+        // Backward compatibility: inline base64 data
+        if (file.data && file.mime_type && file.mime_type.startsWith('image/')) {
+            return `data:${file.mime_type};base64,${file.data}`
+        }
+
+        // Fallback to fetching actual file content when it's an upload we can serve
+        if (file.path && file.source === 'upload') {
+            return this.buildFileUrl(file.path)
+        }
+
+        return null
+    }
+
+    getDisplayPath(file) {
+        /**
+         * Build a user-facing path string that matches actual storage on disk.
+         */
+        if (!file) return ''
+        const relative = file.path || `DATA_FROM_USER/${file.ref || ''}`
+        if (this.sessionId) {
+            return `./chats/${this.sessionId}/${relative}`
+        }
+        return `./${relative}`
+    }
+
+    buildFileContextHint() {
+        /**
+         * Build a short inline hint about available files to accompany every user message.
+         */
+        if (!this.sessionFiles || this.sessionFiles.length === 0) return null
+
+        const entries = this.sessionFiles.map(file => {
+            const path = this.getDisplayPath(file)
+            const size = file.size_human || this.formatFileSize(file.size || 0)
+            const type = file.file_type || file.type || 'file'
+            return `- @${file.ref} (${type}, ${size}) at ${path}`
+        })
+
+        return [
+            'Context: Uploaded session files live under ./chats/<session_id>/DATA_FROM_USER/.',
+            'You can read them via their @references:',
+            ...entries
+        ].join('\n')
+    }
+
+    initFilePreview() {
+        /**
+         * Create lightweight hover preview for image files in the sidebar.
+         */
+        this.filePreviewEl = document.createElement('div')
+        this.filePreviewEl.className = 'file-preview-card hidden'
+        this.filePreviewEl.innerHTML = `
+            <div class="file-preview-media"></div>
+            <div class="file-preview-meta">
+                <div class="file-preview-name"></div>
+                <div class="file-preview-path"></div>
+                <div class="file-preview-size"></div>
+            </div>
+        `
+        document.body.appendChild(this.filePreviewEl)
+
+        // Keep preview visible while hovering over it
+        this.filePreviewEl.addEventListener('mouseenter', () => {
+            if (this.filePreviewHideTimer) {
+                clearTimeout(this.filePreviewHideTimer)
+                this.filePreviewHideTimer = null
+            }
+        })
+        this.filePreviewEl.addEventListener('mouseleave', () => {
+            this.scheduleHideFilePreview()
+        })
+    }
+
+    showFilePreview(file, anchorEl) {
+        if (!this.filePreviewEl || !anchorEl) return
+
+        const mediaEl = this.filePreviewEl.querySelector('.file-preview-media')
+        const nameEl = this.filePreviewEl.querySelector('.file-preview-name')
+        const pathEl = this.filePreviewEl.querySelector('.file-preview-path')
+        const sizeEl = this.filePreviewEl.querySelector('.file-preview-size')
+
+        const isImage = file.file_type === 'image' || file.type === 'image' || (file.mime_type && file.mime_type.startsWith('image/'))
+        const iconKey = file.file_type || file.type || 'file'
+        const ext = (file.ref || '').split('.').pop()?.toUpperCase()
+
+        // Default fallback content for non-images
+        mediaEl.innerHTML = `
+            <div class="file-preview-placeholder rich">
+                <div class="file-preview-icon">${this.getFileIcon(iconKey)}</div>
+                <div class="file-preview-label">${ext || iconKey}</div>
+            </div>
+        `
+
+        // Image preview if available
+        const previewUrl = this.getFilePreviewUrl(file)
+        if (isImage && previewUrl) {
+            mediaEl.innerHTML = `<img src="${previewUrl}" alt="${file.ref}">`
+        }
+
+        nameEl.textContent = `@${file.ref}`
+        const displayPath = this.getDisplayPath(file) || 'Uploaded file'
+        pathEl.textContent = displayPath
+        pathEl.title = displayPath
+        sizeEl.textContent = file.size ? this.formatFileSize(file.size) : (file.size_human || '')
+
+        const rect = anchorEl.getBoundingClientRect()
+        const cardWidth = 240
+        const horizontalSpace = 16
+        const left = Math.max(12, rect.left - cardWidth - horizontalSpace)
+        const top = Math.max(12, rect.top)
+
+        this.filePreviewEl.style.left = `${left}px`
+        this.filePreviewEl.style.top = `${top}px`
+        this.filePreviewEl.classList.remove('hidden')
+
+        if (this.filePreviewHideTimer) {
+            clearTimeout(this.filePreviewHideTimer)
+            this.filePreviewHideTimer = null
+        }
+    }
+
+    scheduleHideFilePreview() {
+        if (!this.filePreviewEl) return
+        if (this.filePreviewHideTimer) {
+            clearTimeout(this.filePreviewHideTimer)
+        }
+        this.filePreviewHideTimer = setTimeout(() => {
+            this.filePreviewEl.classList.add('hidden')
+        }, 120)
     }
 
     getFileIcon(fileType) {
@@ -4893,6 +5769,24 @@ class BassiWebClient {
             'unknown': '📎'
         }
         return icons[fileType] || icons['unknown']
+    }
+
+    addFileContextSystemMessage() {
+        /**
+         * Surface a short system note so the agent and user see where files live.
+         */
+        if (!this.sessionFiles || this.sessionFiles.length === 0) return
+        const paths = this.sessionFiles
+            .slice(0, 4)
+            .map(f => `@${f.ref} → ${this.getDisplayPath(f)}`)
+            .join('<br>')
+
+        const more = this.sessionFiles.length > 4 ? `<br>...and ${this.sessionFiles.length - 4} more` : ''
+
+        this.addSystemMessage(
+            `Session files are available under <code>./chats/&lt;session_id&gt;/DATA_FROM_USER/</code> and can be referenced with @filename.<br>${paths}${more}`
+            , false, { allowHtml: true })
+        this.fileContextHintShown = true
     }
 
     formatFileSize(bytes) {

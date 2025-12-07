@@ -744,3 +744,4 @@ class ChatWorkspace:
 
 # Backward compatibility alias
 SessionWorkspace = ChatWorkspace
+

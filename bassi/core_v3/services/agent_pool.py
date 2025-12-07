@@ -390,6 +390,9 @@ class AgentPool:
                 if pooled.agent is agent:
                     browser_id = pooled.browser_id or "unknown"
 
+                    # Reset SDK-side context to avoid leaking prior chat history
+                    await agent.clear_server_context()
+
                     # Clear agent state
                     agent.message_history.clear()
                     agent.stats.message_count = 0
