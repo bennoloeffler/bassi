@@ -22,7 +22,7 @@ from fastapi.websockets import WebSocketDisconnect
 
 from bassi.core_v3.chat_workspace import ChatWorkspace
 from bassi.core_v3.models.browser_session import BrowserSession
-from bassi.core_v3.services.agent_pool import AgentPool
+from bassi.core_v3.services.agent_pool import AgentPool, PoolExhaustedException
 from bassi.core_v3.tools import InteractiveQuestionService
 
 logger = logging.getLogger(__name__)
@@ -229,6 +229,23 @@ class BrowserSessionManager:
 
         except WebSocketDisconnect:
             logger.info(f"📴 [WS] Browser {browser_id[:8]} disconnected")
+        except PoolExhaustedException as e:
+            # Pool is at max capacity and all agents are busy - immediate feedback!
+            logger.warning(
+                f"🚫 [WS] Pool exhausted for browser {browser_id[:8]}: "
+                f"{e.in_use}/{e.pool_size} agents in use"
+            )
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "pool_exhausted",
+                        "message": "All AI assistants are busy. Please try again in a few minutes.",
+                        "pool_size": e.pool_size,
+                        "in_use": e.in_use,
+                    }
+                )
+            except Exception:
+                pass  # WebSocket might already be closed
         except Exception as e:
             logger.error(f"❌ [WS] Error: {e}", exc_info=True)
         finally:

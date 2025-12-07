@@ -49,16 +49,12 @@ from bassi.core_v3.websocket.browser_session_manager import (
 
 logger = logging.getLogger(__name__)
 
-# Constants
-AGENT_POOL_SIZE = 5
-
-
 class WebUIServerV3:
     """
     FastAPI server for bassi web UI with Agent Pool architecture.
 
     Features:
-    - Pool of 5 pre-connected agents
+    - Dynamic pool of pre-connected agents (configured via .env)
     - Fast browser connection (agent already ready)
     - Support for multiple concurrent browsers
     - Clean chat context switching
@@ -68,7 +64,6 @@ class WebUIServerV3:
         self,
         workspace_base_path: str = "chats",
         session_factory: Optional[Callable] = None,
-        pool_size: int = AGENT_POOL_SIZE,
     ):
         """
         Initialize web server.
@@ -77,11 +72,9 @@ class WebUIServerV3:
             workspace_base_path: Base directory for chat workspaces
             session_factory: Factory function to create agent sessions
                            (injected for testing)
-            pool_size: Number of agents in pool (default 5)
         """
         self.workspace_base_path = Path(workspace_base_path)
         self._is_custom_session_factory = session_factory is not None
-        self.pool_size = pool_size
 
         # Initialize services FIRST (permission_manager needed for agent factory)
         self.chat_index = ChatIndex(self.workspace_base_path)
@@ -102,8 +95,8 @@ class WebUIServerV3:
         )
 
         # Get or create agent pool singleton (survives hot reloads)
+        # Pool config comes from environment variables (see PoolConfig)
         self.agent_pool = get_agent_pool(
-            size=pool_size,
             agent_factory=self.agent_factory,
             acquire_timeout=30.0,
         )
@@ -185,7 +178,7 @@ class WebUIServerV3:
             await self.agent_pool.start()
             stats = self.agent_pool.get_stats()
             logger.info(
-                f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{self.pool_size} agents, "
+                f"✅ [SERVER] Agent pool ready: {stats['total_agents']}/{stats['max_size']} agents, "
                 f"available={stats['available']}, pool_id={id(self.agent_pool)}"
             )
             yield

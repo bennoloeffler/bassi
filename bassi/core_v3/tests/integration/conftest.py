@@ -263,10 +263,10 @@ def web_server_with_pool(request, tmp_path):
     tmp_workspace.mkdir()
 
     # Create server with custom factory
+    # Pool size is configured via environment variables (see PoolConfig)
     server = WebUIServerV3(
         workspace_base_path=str(tmp_workspace),
         session_factory=custom_factory,
-        pool_size=1,  # Single agent for faster tests
     )
 
     # Manually start the pool (TestClient doesn't fire startup events)

@@ -272,6 +272,38 @@ async def get_active_models():
     )
 
 
+# ========== Pool Status ==========
+
+
+class PoolStatusResponse(BaseModel):
+    """Simple pool status for frontend polling"""
+
+    total_agents: int
+    in_use: int
+    available: int
+    max_size: int
+
+
+@router.get("/pool/status", response_model=PoolStatusResponse)
+async def get_pool_status():
+    """Get pool status for frontend polling.
+
+    Returns simple stats about agent availability.
+    Used by frontend to show when agents become available.
+    """
+    from bassi.core_v3.services.agent_pool import get_agent_pool
+
+    pool = get_agent_pool()
+    stats = pool.get_stats()
+
+    return PoolStatusResponse(
+        total_agents=stats["total_agents"],
+        in_use=stats["in_use"],
+        available=stats["available"],
+        max_size=stats["max_size"],
+    )
+
+
 # ========== Permissions Info ==========
 
 

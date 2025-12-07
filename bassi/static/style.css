@@ -188,6 +188,27 @@ body.mobile-layout.sidebar-open .main-content {
     border: 1px solid rgba(248, 81, 73, 0.3);
 }
 
+.connection-status.status-exhausted {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--accent-red);
+    border: 1px solid rgba(248, 81, 73, 0.4);
+    font-weight: 600;
+}
+
+.connection-status.status-creating {
+    background: rgba(210, 153, 34, 0.1);
+    color: var(--accent-yellow);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    animation: pulse 1.5s infinite;
+}
+
+.connection-status.status-available {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-green);
+    border: 1px solid rgba(63, 185, 80, 0.4);
+    font-weight: 600;
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
@@ -220,6 +241,18 @@ body.mobile-layout.sidebar-open .main-content {
     background: rgba(59, 130, 246, 0.2);
     color: #60a5fa;
     border-color: rgba(59, 130, 246, 0.4);
+}
+
+.connection-count.pool-full {
+    background: rgba(234, 179, 8, 0.2);
+    color: #eab308;
+    border-color: rgba(234, 179, 8, 0.4);
+}
+
+.connection-count.pool-available {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--accent-green);
+    border-color: rgba(63, 185, 80, 0.4);
 }
 
 /* ========== Settings Status Icons ========== */
@@ -1660,6 +1693,198 @@ body.hide-thinking .thinking-block {
 .error-content {
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+/* ========== Pool Exhausted Message ========== */
+
+.pool-exhausted-message {
+    margin-bottom: var(--spacing-lg);
+    background: linear-gradient(135deg, rgba(248, 158, 49, 0.15) 0%, rgba(248, 158, 49, 0.05) 100%);
+    border: 2px solid var(--accent-yellow);
+    border-radius: 12px;
+    padding: var(--spacing-lg);
+    text-align: center;
+}
+
+.exhausted-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: var(--accent-red);
+}
+
+.exhausted-icon {
+    font-size: 1.5rem;
+}
+
+.exhausted-content {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--spacing-sm);
+}
+
+.exhausted-stats {
+    display: flex;
+    justify-content: center;
+    gap: var(--spacing-lg);
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-family: var(--font-mono);
+    margin-bottom: var(--spacing-md);
+}
+
+.exhausted-stats .pool-stats {
+    color: var(--accent-red);
+}
+
+.exhausted-stats .available-stats {
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+}
+
+.exhausted-stats .available-stats.available-highlight {
+    color: var(--accent-green);
+    font-weight: 700;
+    animation: pulse-green 1s ease-in-out infinite;
+}
+
+@keyframes pulse-green {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Watching for free agents status */
+.watching-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(248, 158, 49, 0.1);
+    border-radius: 8px;
+}
+
+.watching-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(248, 158, 49, 0.3);
+    border-top-color: var(--accent-yellow);
+    border-radius: 50%;
+    animation: watching-spin 1s linear infinite;
+}
+
+@keyframes watching-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.retry-countdown {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(248, 81, 73, 0.1);
+    border-radius: 8px;
+    display: inline-flex;
+}
+
+.countdown-icon {
+    animation: spin-slow 2s linear infinite;
+}
+
+@keyframes spin-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.countdown-number {
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--accent-red);
+    min-width: 1.5em;
+    text-align: center;
+}
+
+.retry-button {
+    background: var(--accent-yellow);
+    color: var(--bg-primary);
+    border: none;
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 1rem;
+}
+
+.retry-button:hover {
+    background: #e09a2a;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(248, 158, 49, 0.3);
+}
+
+.retry-button:active {
+    transform: translateY(0);
+}
+
+.retry-button.connect-available {
+    background: var(--accent-green);
+    animation: pulse-green 1s ease-in-out infinite;
+}
+
+.retry-button.connect-available:hover {
+    background: #2ea043;
+    box-shadow: 0 4px 12px rgba(63, 185, 80, 0.4);
+}
+
+/* Pool Available Message (transition from exhausted) */
+.pool-available-message {
+    margin-bottom: var(--spacing-lg);
+    background: linear-gradient(135deg, rgba(63, 185, 80, 0.15) 0%, rgba(63, 185, 80, 0.05) 100%);
+    border: 2px solid var(--accent-green);
+    border-radius: 12px;
+    padding: var(--spacing-lg);
+    text-align: center;
+    animation: transition-to-green 0.5s ease-out;
+}
+
+@keyframes transition-to-green {
+    from {
+        background: linear-gradient(135deg, rgba(248, 81, 73, 0.15) 0%, rgba(248, 81, 73, 0.05) 100%);
+        border-color: var(--accent-red);
+    }
+    to {
+        background: linear-gradient(135deg, rgba(63, 185, 80, 0.15) 0%, rgba(63, 185, 80, 0.05) 100%);
+        border-color: var(--accent-green);
+    }
+}
+
+.pool-available-message .exhausted-header {
+    color: var(--accent-green);
+}
+
+.pool-available-message .exhausted-stats .pool-stats {
+    color: var(--accent-green);
+}
+
+.pool-available-message .retry-button {
+    background: var(--accent-green);
+}
+
+.pool-available-message .retry-button:hover {
+    background: #2da050;
+    box-shadow: 0 4px 12px rgba(63, 185, 80, 0.3);
 }
 
 /* ========== File Area ========== */

@@ -6,6 +6,7 @@ Handles loading from ~/.bassi/config.json and .env files
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,6 +14,48 @@ from pydantic import BaseModel, Field
 
 # Load .env file from project root
 load_dotenv()
+
+
+@dataclass
+class PoolConfig:
+    """Configuration for the dynamic agent pool.
+
+    Constraints:
+    - max_size >= initial_size (can't start with more than max allows)
+    - keep_idle_size is auto-constrained by max_size at runtime
+    """
+
+    initial_size: int = 5  # Agents to create at startup
+    keep_idle_size: int = 2  # Target idle agents - grow when below this
+    max_size: int = 30  # Hard limit on pool size
+
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # MAX must be >= INITIAL
+        if self.max_size < self.initial_size:
+            logger.warning(
+                f"⚠️ [POOL CONFIG] max_size ({self.max_size}) < initial_size ({self.initial_size}). "
+                f"Setting initial_size = max_size = {self.max_size}"
+            )
+            self.initial_size = self.max_size
+
+    @classmethod
+    def from_env(cls) -> "PoolConfig":
+        """Load pool config from environment variables."""
+        return cls(
+            initial_size=int(os.getenv("AGENT_INITIAL_POOL_SIZE", "5")),
+            keep_idle_size=int(os.getenv("AGENT_KEEP_IDLE_SIZE", "2")),
+            max_size=int(os.getenv("AGENT_MAX_POOL_SIZE", "30")),
+        )
+
+
+def get_pool_config() -> PoolConfig:
+    """Get pool configuration from environment."""
+    return PoolConfig.from_env()
 
 
 class Config(BaseModel):

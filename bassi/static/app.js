@@ -408,20 +408,28 @@ class BassiWebClient {
 
     async updateConnectionCount() {
         try {
-            const response = await fetch('/health')
+            const response = await fetch('/api/settings/pool/status')
             const data = await response.json()
 
-            const count = data.active_connections || 0
+            const inUse = data.in_use || 0
+            const total = data.total_agents || 0
+            const available = data.available || 0
 
             if (this.connectionCountEl) {
-                this.connectionCountEl.textContent = count
+                // Show as "in_use/total" format
+                this.connectionCountEl.textContent = `${inUse}/${total}`
 
-                // Update styling for multiple connections
+                // Update styling based on availability
                 if (this.connectionCountContainer) {
-                    if (count > 1) {
-                        this.connectionCountContainer.classList.add('multiple')
+                    this.connectionCountContainer.classList.remove('pool-full', 'pool-available')
+                    if (available === 0 && inUse > 0) {
+                        this.connectionCountContainer.classList.add('pool-full')
+                        this.connectionCountContainer.title = `All ${total} agents in use`
+                    } else if (available > 0) {
+                        this.connectionCountContainer.classList.add('pool-available')
+                        this.connectionCountContainer.title = `${available} of ${total} agents available`
                     } else {
-                        this.connectionCountContainer.classList.remove('multiple')
+                        this.connectionCountContainer.title = `${inUse}/${total} agents in use`
                     }
                 }
             }
@@ -1538,7 +1546,10 @@ class BassiWebClient {
             connecting: { text: 'Connecting...', class: 'status-connecting', icon: '🔄' },
             connected: { text: 'Connected', class: 'status-connected', icon: '✅' },
             disconnected: { text: 'Disconnected', class: 'status-disconnected', icon: '❌' },
-            error: { text: 'Error', class: 'status-error', icon: '⚠️' }
+            error: { text: 'Error', class: 'status-error', icon: '⚠️' },
+            exhausted: { text: 'All Busy', class: 'status-exhausted', icon: '🚫' },
+            available: { text: 'Available', class: 'status-available', icon: '✅' },
+            creating: { text: 'Starting...', class: 'status-creating', icon: '⏳' }
         }
 
         const config = statusConfig[status] || statusConfig.disconnected
@@ -2523,6 +2534,20 @@ class BassiWebClient {
             case 'model_changed':
                 // Model was changed (e.g., auto-escalation)
                 this.handleModelChanged(msg)
+                break
+
+            case 'pool_creating_agent':
+                // Server is creating a new agent - may take ~20 seconds
+                console.log('⏳ Pool creating new agent:', msg.message)
+                this.updateConnectionStatus('creating')
+                this.showServerStatus(msg.message || 'Creating new AI assistant... (~20 seconds)')
+                break
+
+            case 'pool_exhausted':
+                // All agents are busy - immediate feedback
+                console.warn('🚫 Pool exhausted:', msg.message)
+                this.updateConnectionStatus('exhausted')
+                this.handlePoolExhausted(msg)
                 break
 
             default:
@@ -4240,6 +4265,222 @@ class BassiWebClient {
         // Agent errored - reset button
         this.setAgentWorking(false)
         this.scrollToBottom()
+    }
+
+    handlePoolExhausted(msg) {
+        console.warn('🚫 Pool exhausted:', msg)
+
+        // Hide the "Acquiring agent..." status bar
+        this.hideServerStatus()
+
+        // Stop any existing retry timer
+        this.stopPoolRetry()
+
+        // Store initial pool info
+        this.poolStatus = {
+            total: msg.pool_size || 0,
+            inUse: msg.in_use || 0,
+            available: 0
+        }
+
+        // Check if exhausted message already exists - avoid duplicates
+        let exhaustedEl = document.getElementById('pool-exhausted-message')
+        if (exhaustedEl) {
+            // Update existing message instead of creating duplicate
+            exhaustedEl.className = 'pool-exhausted-message message-fade-in'
+            exhaustedEl.innerHTML = this.buildExhaustedMessageHTML()
+        } else {
+            // Create new message
+            exhaustedEl = document.createElement('div')
+            exhaustedEl.id = 'pool-exhausted-message'
+            exhaustedEl.className = 'pool-exhausted-message message-fade-in'
+            exhaustedEl.innerHTML = this.buildExhaustedMessageHTML()
+            this.conversationEl.appendChild(exhaustedEl)
+        }
+        this.scrollToBottom()
+
+        // Start auto-retry countdown and pool status polling
+        this.startPoolRetry()
+    }
+
+    buildExhaustedMessageHTML() {
+        const status = this.poolStatus || { total: 0, inUse: 0, available: 0 }
+
+        return `
+            <div class="exhausted-header">
+                <span class="exhausted-icon">🚫</span>
+                <span>All AI Assistants Busy</span>
+            </div>
+            <div class="exhausted-content">
+                All AI assistants are currently busy.
+            </div>
+            <div class="exhausted-stats">
+                <span class="pool-stats">${status.inUse}/${status.total} assistants in use</span>
+                <span class="available-stats ${status.available > 0 ? 'available-highlight' : ''}">${status.available} available</span>
+            </div>
+            <div class="watching-status">
+                <span class="watching-spinner"></span>
+                <span>Watching for free agents...</span>
+            </div>
+            <button class="retry-button" onclick="window.bassiClient.retryConnection()">
+                🔄 Try Now
+            </button>
+        `
+    }
+
+    startPoolRetry() {
+        // No countdown timer - just poll for status updates
+        // User must click "Connect Now" manually (prevents abandoned windows grabbing agents)
+        this.pollPoolStatus()
+        this.poolStatusInterval = setInterval(() => this.pollPoolStatus(), 5000)
+    }
+
+    stopPoolRetry() {
+        if (this.poolStatusInterval) {
+            clearInterval(this.poolStatusInterval)
+            this.poolStatusInterval = null
+        }
+    }
+
+    async pollPoolStatus() {
+        try {
+            const response = await fetch('/api/settings/pool/status')
+            if (response.ok) {
+                const data = await response.json()
+                this.poolStatus = {
+                    total: data.total_agents,
+                    inUse: data.in_use,
+                    available: data.available
+                }
+
+                // Update display
+                const statsEl = document.querySelector('#pool-exhausted-message .pool-stats')
+                const availableEl = document.querySelector('#pool-exhausted-message .available-stats')
+
+                if (statsEl) {
+                    statsEl.textContent = `${data.in_use}/${data.total_agents} assistants in use`
+                }
+                if (availableEl) {
+                    availableEl.textContent = `${data.available} available`
+                    if (data.available > 0) {
+                        availableEl.classList.add('available-highlight')
+                    } else {
+                        availableEl.classList.remove('available-highlight')
+                    }
+                }
+
+                // If agents are available, transition to green (but don't auto-connect)
+                if (data.available > 0) {
+                    console.log('✅ Agents available! Showing green message...')
+                    this.transitionToAvailable()
+                } else {
+                    // Agents became busy again - transition back to red
+                    this.transitionBackToExhausted()
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to poll pool status:', err)
+        }
+    }
+
+    transitionToAvailable() {
+        // Update the exhausted message to show availability - but DON'T auto-connect
+        // Let user decide to connect (prevents abandoned windows grabbing agents)
+
+        const exhaustedEl = document.getElementById('pool-exhausted-message')
+        if (exhaustedEl) {
+            exhaustedEl.classList.remove('pool-exhausted-message')
+            exhaustedEl.classList.add('pool-available-message')
+
+            const headerEl = exhaustedEl.querySelector('.exhausted-header')
+            if (headerEl) {
+                headerEl.innerHTML = `
+                    <span class="exhausted-icon">✅</span>
+                    <span>Assistant Available!</span>
+                `
+            }
+
+            const contentEl = exhaustedEl.querySelector('.exhausted-content')
+            if (contentEl) {
+                contentEl.textContent = 'An AI assistant is now available. Click to connect.'
+            }
+
+            // Hide watching status when available
+            const watchingEl = exhaustedEl.querySelector('.watching-status')
+            if (watchingEl) {
+                watchingEl.style.display = 'none'
+            }
+
+            // Update button text
+            const buttonEl = exhaustedEl.querySelector('.retry-button')
+            if (buttonEl) {
+                buttonEl.textContent = '✅ Connect Now'
+                buttonEl.classList.add('connect-available')
+            }
+        }
+
+        // Update connection status indicator
+        this.updateConnectionStatus('available')
+    }
+
+    transitionBackToExhausted() {
+        // Called when poll shows agents became busy again
+        const exhaustedEl = document.getElementById('pool-exhausted-message')
+        if (exhaustedEl && exhaustedEl.classList.contains('pool-available-message')) {
+            exhaustedEl.classList.remove('pool-available-message')
+            exhaustedEl.classList.add('pool-exhausted-message')
+
+            const headerEl = exhaustedEl.querySelector('.exhausted-header')
+            if (headerEl) {
+                headerEl.innerHTML = `
+                    <span class="exhausted-icon">🚫</span>
+                    <span>All AI Assistants Busy</span>
+                `
+            }
+
+            const contentEl = exhaustedEl.querySelector('.exhausted-content')
+            if (contentEl) {
+                contentEl.textContent = 'All AI assistants are currently busy.'
+            }
+
+            // Show watching status again
+            const watchingEl = exhaustedEl.querySelector('.watching-status')
+            if (watchingEl) {
+                watchingEl.style.display = 'flex'
+            }
+
+            // Update button
+            const buttonEl = exhaustedEl.querySelector('.retry-button')
+            if (buttonEl) {
+                buttonEl.textContent = '🔄 Try Now'
+                buttonEl.classList.remove('connect-available')
+            }
+
+            this.updateConnectionStatus('exhausted')
+        }
+    }
+
+    retryConnection() {
+        console.log('🔄 Retrying connection...')
+
+        // Stop timers
+        this.stopPoolRetry()
+
+        // Remove exhausted message
+        const exhaustedEl = document.getElementById('pool-exhausted-message')
+        if (exhaustedEl) {
+            exhaustedEl.remove()
+        }
+
+        // Mark as intentional disconnect to prevent onclose from ALSO triggering reconnect
+        // (fixes race condition where two connect() calls would compete for same agent)
+        this.isIntentionalDisconnect = true
+
+        // Close current connection and reconnect
+        if (this.ws) {
+            this.ws.close()
+        }
+        setTimeout(() => this.connect(), 500)
     }
 
     // ========== Utilities ==========

@@ -1,27 +1,36 @@
 """
-Agent Pool - Manages a pool of pre-connected agent instances.
+Agent Pool - Manages a dynamic pool of pre-connected agent instances.
 
 Provides:
-- Pool of N agents (default 5) that are pre-connected to Claude SDK
-- Fast acquire/release for browser sessions
+- Dynamic pool that grows on demand (up to configurable max)
+- Pre-connected agents for instant availability
 - Async warmup: first agent ready immediately, rest warm up in background
 - Automatic state reset between uses
 - **SINGLETON**: Survives hot reloads (agents stay connected)
 
+Configuration (via environment variables):
+- AGENT_INITIAL_POOL_SIZE: Agents to create at startup (default 5)
+- AGENT_KEEP_IDLE_SIZE: Target idle agents - when idle drops below this, start creating more (default 2)
+- AGENT_MAX_POOL_SIZE: Maximum agents in pool (default 30)
+
 Architecture:
 - Browser session connects → acquire agent from pool
+- If pool running low → create new agents in background
+- If no agent available → create one synchronously (user waits ~20s)
 - Browser session disconnects → release agent back to pool
 - Agents stay connected (expensive to start/stop)
 - Agent state cleared between uses (history, workspace)
 - Hot reload: Pool persists, only app code reloads
 
 Usage:
+    from bassi.config import get_pool_config
+
     # Get or create singleton pool
-    pool = get_agent_pool(size=5, agent_factory=my_factory)
+    pool = get_agent_pool(agent_factory=my_factory)
     await pool.start()  # Only starts if not already started
 
     # On browser connect:
-    agent = await pool.acquire(timeout=30)
+    agent, is_new = await pool.acquire(browser_id, on_creating=callback)
 
     # On browser disconnect:
     await pool.release(agent)
@@ -34,11 +43,29 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
+from bassi.config import PoolConfig, get_pool_config
 from bassi.core_v3.agent_session import BassiAgentSession
 
 logger = logging.getLogger(__name__)
+
+
+class PoolExhaustedException(Exception):
+    """
+    Raised when the agent pool is at maximum capacity and all agents are busy.
+
+    This is raised IMMEDIATELY (no waiting) to allow fast user feedback.
+    The caller should catch this and notify the user that no agents are available.
+    """
+
+    def __init__(self, pool_size: int, in_use: int):
+        self.pool_size = pool_size
+        self.in_use = in_use
+        super().__init__(
+            f"All {pool_size} agents are busy. Please try again in a moment."
+        )
+
 
 # ============================================================
 # SINGLETON POOL - Survives hot reloads
@@ -47,9 +74,11 @@ _global_pool: Optional["AgentPool"] = None
 
 
 def get_agent_pool(
-    size: int = 5,
     agent_factory: Optional[Callable[[], BassiAgentSession]] = None,
     acquire_timeout: float = 30.0,
+    pool_config: Optional[PoolConfig] = None,
+    # DEPRECATED: size parameter - use pool_config instead
+    size: Optional[int] = None,
 ) -> "AgentPool":
     """
     Get or create the global agent pool singleton.
@@ -57,21 +86,32 @@ def get_agent_pool(
     The pool persists across hot reloads so agents stay connected.
 
     Args:
-        size: Number of agents (only used on first call)
         agent_factory: Factory to create agents (only used on first call)
-        acquire_timeout: Timeout for acquiring agents
+        acquire_timeout: Timeout for acquiring agents (before creating new one)
+        pool_config: Pool configuration (uses env vars if None)
+        size: DEPRECATED - use pool_config.initial_size instead
 
     Returns:
         The global AgentPool instance
     """
     global _global_pool
 
+    # Use provided config or load from environment
+    config = pool_config or get_pool_config()
+
+    # Handle deprecated size parameter
+    if size is not None:
+        logger.warning(
+            "⚠️ [POOL] 'size' parameter is deprecated. Use pool_config instead."
+        )
+        config.initial_size = size
+
     if _global_pool is None:
         logger.info("🏊 [POOL] Creating new global agent pool singleton")
         _global_pool = AgentPool(
-            size=size,
             agent_factory=agent_factory,
             acquire_timeout=acquire_timeout,
+            pool_config=config,
         )
         logger.info(f"🏊 [POOL] Created pool_id={id(_global_pool)}")
     else:
@@ -116,35 +156,57 @@ class PooledAgent:
     browser_id: Optional[str] = None  # Track which browser is using this
 
 
+@dataclass
+class AcquireResult:
+    """Result of acquiring an agent from the pool."""
+
+    agent: BassiAgentSession
+    created_new: bool = False  # True if agent was created for this request
+    wait_time_ms: float = 0.0
+
+
 class AgentPool:
     """
-    Manages a pool of pre-connected Claude Agent SDK clients.
+    Manages a dynamic pool of pre-connected Claude Agent SDK clients.
 
     Key Features:
+    - Dynamic sizing: grows on demand, up to max_size
     - Pre-connected agents for instant availability
     - Async warmup (first agent immediate, rest in background)
+    - Proactive growth: starts creating when idle drops below threshold
     - Clean acquire/release for browser sessions
     - State reset between uses
-    - Timeout handling when pool exhausted
+    - User notification when creating new agent
     """
 
     def __init__(
         self,
-        size: int = 5,
         agent_factory: Optional[Callable[[], BassiAgentSession]] = None,
         acquire_timeout: float = 30.0,
+        pool_config: Optional[PoolConfig] = None,
+        # DEPRECATED: size parameter - use pool_config instead
+        size: Optional[int] = None,
     ):
         """
         Initialize agent pool.
 
         Args:
-            size: Number of agents in pool (default 5)
             agent_factory: Factory function to create agents
-            acquire_timeout: Max wait time when pool exhausted (seconds)
+            acquire_timeout: Max wait time before creating new agent (seconds)
+            pool_config: Pool configuration (uses env vars if None)
+            size: DEPRECATED - use pool_config.initial_size instead
         """
-        self.size = size
+        self.config = pool_config or get_pool_config()
+
+        # Handle deprecated size parameter
+        if size is not None:
+            self.config.initial_size = size
+
         self.agent_factory = agent_factory
         self.acquire_timeout = acquire_timeout
+
+        # For backward compatibility
+        self.size = self.config.initial_size
 
         # Pool state
         self._agents: list[PooledAgent] = []
@@ -155,23 +217,32 @@ class AgentPool:
         self._started = False
         self._shutdown = False
         self._warmup_task: Optional[asyncio.Task] = None
+        self._growth_task: Optional[asyncio.Task] = None
+        self._growth_in_progress = 0  # Number of agents currently being created
 
         # Stats
         self._total_acquires = 0
         self._total_releases = 0
         self._acquire_wait_times: list[float] = []
+        self._agents_created_on_demand = 0  # Agents created because pool was exhausted
 
     async def start(self) -> None:
         """
         Start the agent pool.
 
         Creates and connects the first agent synchronously (blocks until ready).
-        Starts background task to warm up remaining agents.
+        Starts background task to warm up remaining initial agents.
 
         After this returns, at least one agent is ready for use.
 
         NOTE: This is idempotent and handles hot reload recovery.
         """
+        # Log config at startup
+        logger.info(
+            f"🔧 [POOL CONFIG] INITIAL={self.config.initial_size}, "
+            f"IDLE={self.config.keep_idle_size}, MAX={self.config.max_size}"
+        )
+
         # Handle hot reload: if pool was shutdown but we're being started again,
         # reset the shutdown flag (uvicorn hot reload calls shutdown then start)
         if self._shutdown:
@@ -199,8 +270,10 @@ class AgentPool:
                 )
             return
 
-        print(f"🏊🏊🏊 [POOL] Starting with {self.size} agents...")
-        logger.info(f"🏊 [POOL] Starting with {self.size} agents...")
+        # Clamp initial_size to max_size (can't start with more than max allows)
+        initial_size = min(self.config.initial_size, self.config.max_size)
+        print(f"🏊🏊🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})...")
+        logger.info(f"🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})...")
         start_time = time.time()
 
         # Create and connect first agent (blocking)
@@ -217,8 +290,8 @@ class AgentPool:
         # Mark as started so browser can connect
         self._started = True
 
-        # Warm up remaining agents in background
-        remaining = self.size - 1
+        # Warm up remaining initial agents in background
+        remaining = initial_size - 1
         if remaining > 0:
             logger.info(
                 f"🔥 [POOL] Warming up {remaining} more agents in background..."
@@ -240,15 +313,29 @@ class AgentPool:
         """Warm up additional agents in background."""
         warmup_start = time.time()
         created = 0
+        logger.info(
+            f"🔥 [POOL] _warmup_remaining: creating {count} agents "
+            f"(INITIAL={self.config.initial_size}, MAX={self.config.max_size})"
+        )
 
         for i in range(count):
             if self._shutdown:
                 logger.info("⏹️ [POOL] Warmup cancelled (shutdown)")
                 break
 
+            # Check we haven't hit max
+            current = len(self._agents)
+            if current >= self.config.max_size:
+                logger.info(
+                    f"⏹️ [POOL] Warmup stopped: hit MAX={self.config.max_size} "
+                    f"(current={current})"
+                )
+                break
+
             try:
+                self._growth_in_progress += 1
                 logger.debug(
-                    f"🔶 [POOL] Warming agent {i + 2}/{self.size}..."
+                    f"🔶 [POOL] Warming agent {len(self._agents) + 1}/{self.config.initial_size}..."
                 )
                 agent = await self._create_and_connect_agent()
 
@@ -256,43 +343,151 @@ class AgentPool:
                     self._agents.append(PooledAgent(agent=agent))
 
                 created += 1
-                logger.debug(f"✅ [POOL] Agent {i + 2}/{self.size} ready")
+                logger.debug(f"✅ [POOL] Agent {len(self._agents)}/{self.config.initial_size} ready")
 
                 # Signal that a new agent is available
                 async with self._available:
                     self._available.notify_all()
 
             except Exception as e:
-                logger.error(f"❌ [POOL] Failed to create agent {i + 2}: {e}")
+                logger.error(f"❌ [POOL] Failed to create agent: {e}")
+            finally:
+                self._growth_in_progress -= 1
 
         warmup_time = time.time() - warmup_start
         logger.info(
             f"✅ [POOL] Warmup complete: {created}/{count} agents in {warmup_time:.2f}s "
-            f"(total: {len(self._agents)}/{self.size})"
+            f"(total: {len(self._agents)})"
         )
+
+    def _get_idle_count(self) -> int:
+        """Get number of idle (available) agents."""
+        return sum(1 for p in self._agents if not p.in_use)
+
+    def _should_grow(self) -> bool:
+        """Check if pool should grow based on idle threshold."""
+        current = len(self._agents)
+        idle = self._get_idle_count()
+        total_with_growing = current + self._growth_in_progress
+
+        if self._shutdown:
+            logger.debug(f"📊 [POOL] _should_grow: NO (shutdown)")
+            return False
+        if total_with_growing >= self.config.max_size:
+            logger.debug(
+                f"📊 [POOL] _should_grow: NO (at MAX={self.config.max_size}, "
+                f"current={current}, growing={self._growth_in_progress})"
+            )
+            return False
+
+        should = idle < self.config.keep_idle_size
+        logger.debug(
+            f"📊 [POOL] _should_grow: {'YES' if should else 'NO'} "
+            f"(idle={idle}, IDLE_TARGET={self.config.keep_idle_size}, "
+            f"current={current}, MAX={self.config.max_size})"
+        )
+        return should
+
+    async def _maybe_grow_pool(self) -> None:
+        """
+        Check if we should grow the pool and start background creation if needed.
+
+        Called after each acquire to maintain minimum idle agents.
+        """
+        if not self._should_grow():
+            return
+
+        # Calculate how many to create
+        current = len(self._agents)
+        idle = self._get_idle_count()
+        needed = self.config.keep_idle_size - idle
+        max_can_create = self.config.max_size - current - self._growth_in_progress
+        to_create = min(needed, max_can_create)
+
+        logger.info(
+            f"📈 [POOL] Growth check: current={current}, idle={idle}, "
+            f"IDLE_TARGET={self.config.keep_idle_size}, MAX={self.config.max_size}, "
+            f"needed={needed}, max_can_create={max_can_create}, to_create={to_create}"
+        )
+
+        if to_create <= 0:
+            logger.info(f"📈 [POOL] Not growing: to_create={to_create}")
+            return
+
+        logger.info(
+            f"📈 [POOL] Growing pool: creating {to_create} agents in background"
+        )
+
+        # Create agents in background
+        asyncio.create_task(self._grow_agents(to_create))
+
+    async def _grow_agents(self, count: int) -> None:
+        """Create additional agents in background."""
+        created = 0
+        logger.info(f"🌱 [POOL] _grow_agents: starting to create {count} agents")
+
+        for i in range(count):
+            if self._shutdown:
+                logger.info(f"🌱 [POOL] _grow_agents: stopped (shutdown)")
+                break
+            current = len(self._agents)
+            if current >= self.config.max_size:
+                logger.info(
+                    f"🌱 [POOL] _grow_agents: stopped at MAX={self.config.max_size} "
+                    f"(current={current})"
+                )
+                break
+
+            try:
+                self._growth_in_progress += 1
+                logger.debug(f"🌱 [POOL] Growing: creating agent...")
+                agent = await self._create_and_connect_agent()
+
+                async with self._lock:
+                    self._agents.append(PooledAgent(agent=agent))
+
+                created += 1
+                logger.info(f"✅ [POOL] Grew pool: now {len(self._agents)} agents")
+
+                # Signal that a new agent is available
+                async with self._available:
+                    self._available.notify_all()
+
+            except Exception as e:
+                logger.error(f"❌ [POOL] Failed to grow pool: {e}")
+            finally:
+                self._growth_in_progress -= 1
 
     async def acquire(
         self,
         browser_id: str,
         timeout: Optional[float] = None,
+        on_creating: Optional[Callable[[], None]] = None,
     ) -> BassiAgentSession:
         """
         Acquire an agent from the pool.
 
+        If no agent available:
+        - If under max_size: creates new agent (calls on_creating callback)
+        - If at max_size: waits for one to be released (up to timeout)
+
         Args:
             browser_id: ID of browser session acquiring the agent
             timeout: Max wait time (uses pool default if None)
+            on_creating: Callback when we start creating a new agent
+                        (for UI notification "Creating AI assistant...")
 
         Returns:
             Connected BassiAgentSession
 
         Raises:
-            TimeoutError: If no agent available within timeout
+            RuntimeError: If pool at max and all busy (after timeout)
             RuntimeError: If pool not started
         """
         # Log state for debugging
         logger.info(
-            f"🔍 [POOL] acquire() called: started={self._started}, shutdown={self._shutdown}, agents={len(self._agents)}, pool_id={id(self)}"
+            f"🔍 [POOL] acquire() called: started={self._started}, shutdown={self._shutdown}, "
+            f"agents={len(self._agents)}/{self.config.max_size}, pool_id={id(self)}"
         )
 
         # Handle race condition during hot reload:
@@ -348,32 +543,102 @@ class AgentPool:
                             logger.info(
                                 f"🎯 [POOL] Acquired agent for browser {browser_id[:8]} "
                                 f"(wait: {wait_time*1000:.0f}ms, "
-                                f"use #{pooled.use_count})"
+                                f"use #{pooled.use_count}, pool: {len(self._agents)})"
                             )
+
+                            # Check if we should grow pool (background)
+                            asyncio.create_task(self._maybe_grow_pool())
+
                             return pooled.agent
 
-                # No agent available - wait for one
-                remaining_timeout = timeout - (time.time() - acquire_start)
-                if remaining_timeout <= 0:
-                    raise TimeoutError(
-                        f"No agent available within {timeout}s "
-                        f"(pool size: {self.size}, all in use)"
-                    )
+                # No agent available
+                current = len(self._agents)
+                total_agents = current + self._growth_in_progress
+                idle = self._get_idle_count()
 
-                logger.warning(
-                    f"⏳ [POOL] All {len(self._agents)} agents in use, "
-                    f"waiting (timeout: {remaining_timeout:.1f}s)..."
+                logger.info(
+                    f"🔍 [POOL] No agent available: current={current}, idle={idle}, "
+                    f"growing={self._growth_in_progress}, total={total_agents}, MAX={self.config.max_size}"
                 )
 
+                # Can we create a new one?
+                if total_agents < self.config.max_size:
+                    logger.info(
+                        f"🆕 [POOL] Creating new agent on-demand "
+                        f"(current={current} + growing={self._growth_in_progress} = {total_agents} < MAX={self.config.max_size})"
+                    )
+
+                    # Notify caller that we're creating (for UI feedback)
+                    if on_creating:
+                        try:
+                            on_creating()
+                        except Exception as e:
+                            logger.warning(f"on_creating callback failed: {e}")
+
+                    # Create new agent synchronously
+                    try:
+                        self._growth_in_progress += 1
+                        agent = await self._create_and_connect_agent()
+
+                        pooled = PooledAgent(
+                            agent=agent,
+                            in_use=True,
+                            acquired_at=time.time(),
+                            browser_id=browser_id,
+                            use_count=1,
+                        )
+
+                        async with self._lock:
+                            self._agents.append(pooled)
+
+                        self._total_acquires += 1
+                        self._agents_created_on_demand += 1
+
+                        wait_time = time.time() - acquire_start
+                        self._acquire_wait_times.append(wait_time)
+                        if len(self._acquire_wait_times) > 100:
+                            self._acquire_wait_times.pop(0)
+
+                        logger.info(
+                            f"✅ [POOL] Created and acquired new agent for browser {browser_id[:8]} "
+                            f"(wait: {wait_time*1000:.0f}ms, pool: {len(self._agents)})"
+                        )
+
+                        return agent
+
+                    except Exception as e:
+                        logger.error(f"❌ [POOL] Failed to create agent: {e}")
+                        raise RuntimeError(f"Failed to create agent: {e}")
+                    finally:
+                        self._growth_in_progress -= 1
+
+                # At max capacity and all agents busy
+                # Wait briefly (2s) for an agent to be released - this handles
+                # race conditions when browser refreshes (old connection releasing
+                # its agent while new connection is trying to acquire)
+                logger.info(
+                    f"⏳ [POOL] Pool at MAX={self.config.max_size}, all busy! "
+                    f"(current={current}, idle={idle}, growing={self._growth_in_progress}) "
+                    f"Waiting 2s for release..."
+                )
                 try:
+                    # Wait for release signal (up to 2 seconds)
                     await asyncio.wait_for(
                         self._available.wait(),
-                        timeout=remaining_timeout,
+                        timeout=2.0,
                     )
+                    # An agent was released! Loop back and try to acquire it
+                    logger.info("✅ [POOL] Agent released during wait, retrying acquire...")
+                    continue
                 except asyncio.TimeoutError:
-                    raise TimeoutError(
-                        f"No agent available within {timeout}s "
-                        f"(pool size: {self.size}, all in use)"
+                    # After brief wait, still no agent available - fail
+                    logger.warning(
+                        f"🚫 [POOL] Pool exhausted after 2s wait: "
+                        f"{self.config.max_size}/{self.config.max_size} agents in use."
+                    )
+                    raise PoolExhaustedException(
+                        pool_size=self.config.max_size,
+                        in_use=self.config.max_size,
                     )
 
     async def release(self, agent: BassiAgentSession) -> None:
@@ -417,7 +682,7 @@ class AgentPool:
 
                     logger.info(
                         f"🔄 [POOL] Released agent from browser {browser_id[:8]} "
-                        f"(used {pooled.use_count} times)"
+                        f"(used {pooled.use_count} times, pool: {len(self._agents)})"
                     )
                     break
             else:
@@ -497,16 +762,32 @@ class AgentPool:
         )
 
         return {
-            "size": self.size,
+            # Current state
             "total_agents": total,
             "in_use": in_use,
             "available": available,
             "utilization": in_use / total if total > 0 else 0,
+
+            # Configuration
+            "initial_size": self.config.initial_size,
+            "max_size": self.config.max_size,
+            "keep_idle_size": self.config.keep_idle_size,
+
+            # Dynamic sizing
+            "growth_in_progress": self._growth_in_progress,
+            "agents_created_on_demand": self._agents_created_on_demand,
+
+            # Cumulative stats
             "total_acquires": self._total_acquires,
             "total_releases": self._total_releases,
             "avg_acquire_wait_ms": round(avg_wait_ms, 2),
+
+            # Lifecycle
             "started": self._started,
             "shutdown": self._shutdown,
+
+            # Backward compatibility
+            "size": self.config.initial_size,
         }
 
     @property
