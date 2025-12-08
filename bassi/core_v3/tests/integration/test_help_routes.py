@@ -6,10 +6,10 @@ for the local ecosystem.
 """
 
 import pytest
+from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from bassi.core_v3.routes.help_routes import create_help_router
-from fastapi import FastAPI
 
 
 @pytest.fixture
@@ -55,7 +55,9 @@ class TestHelpRoutes:
         assert isinstance(help_text, str)
         assert len(help_text) > 0
         # Should mention the ecosystem
-        assert "ecosystem" in help_text.lower() or "agent" in help_text.lower()
+        assert (
+            "ecosystem" in help_text.lower() or "agent" in help_text.lower()
+        )
 
     def test_help_agents_query(self, client):
         """Test GET /api/help?query=agents returns agent list."""
@@ -107,7 +109,9 @@ class TestHelpRoutes:
 
         help_text = data["help"]
         # Should mention workflows
-        assert "workflow" in help_text.lower() or "pattern" in help_text.lower()
+        assert (
+            "workflow" in help_text.lower() or "pattern" in help_text.lower()
+        )
 
     def test_help_specific_skill_query(self, client):
         """Test GET /api/help?query=<skill_name> returns skill details."""

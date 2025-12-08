@@ -652,9 +652,24 @@ def test_list_session_files_multiple_files(test_client, web_server, tmp_path):
     class MockFileRegistry:
         def to_json(self):
             return [
-                {"ref": "a.txt", "source": "upload", "path": "a.txt", "size": 1},
-                {"ref": "b.txt", "source": "upload", "path": "b.txt", "size": 2},
-                {"ref": "c.txt", "source": "upload", "path": "c.txt", "size": 3},
+                {
+                    "ref": "a.txt",
+                    "source": "upload",
+                    "path": "a.txt",
+                    "size": 1,
+                },
+                {
+                    "ref": "b.txt",
+                    "source": "upload",
+                    "path": "b.txt",
+                    "size": 2,
+                },
+                {
+                    "ref": "c.txt",
+                    "source": "upload",
+                    "path": "c.txt",
+                    "size": 3,
+                },
             ]
 
     class StubWorkspace:
@@ -671,7 +686,9 @@ def test_list_session_files_multiple_files(test_client, web_server, tmp_path):
     assert refs == ["a.txt", "b.txt", "c.txt"]
 
 
-def test_get_file_content_serves_workspace_file(test_client, web_server, tmp_path):
+def test_get_file_content_serves_workspace_file(
+    test_client, web_server, tmp_path
+):
     """Ensure files are served from chats/<session_id>/DATA_FROM_USER/ paths."""
     from bassi.core_v3.session_workspace import SessionWorkspace
 
@@ -694,7 +711,9 @@ def test_get_file_content_serves_workspace_file(test_client, web_server, tmp_pat
         mime_type="text/plain",
     )
 
-    response = test_client.get(f"/api/sessions/{session_id}/file/DATA_FROM_USER/hello.txt")
+    response = test_client.get(
+        f"/api/sessions/{session_id}/file/DATA_FROM_USER/hello.txt"
+    )
     assert response.status_code == 200
     assert response.text == "hello world"
 
@@ -1302,7 +1321,9 @@ def test_successful_hint_processing(web_server_with_pool):
             assert messages_received[-1]["type"] == "message_complete"
 
             # Verify query was called with formatted hint
-            assert _hint_query_called, "session.query() should have been called"
+            assert (
+                _hint_query_called
+            ), "session.query() should have been called"
             assert _hint_query_prompt is not None
             assert "Task was interrupted" in _hint_query_prompt
             assert "Test hint content" in _hint_query_prompt
@@ -1397,10 +1418,12 @@ def _recording_query_factory(
     question_service: InteractiveQuestionService,
     workspace: SessionWorkspace,
 ):
-    """Factory that creates session with recording query() for testing."""
-    global _captured_session_ids
-    _captured_session_ids = []  # Reset for this test
+    """Factory that creates session with recording query() for testing.
 
+    NOTE: DO NOT reset _captured_session_ids here! The factory is called
+    multiple times (pool warmup + replacement after release), and resetting
+    here would erase captured data from the actual test execution.
+    """
     session = BassiAgentSession(
         SessionConfig(permission_mode="bypassPermissions"),
         client_factory=_mock_client_factory,
@@ -1411,7 +1434,8 @@ def _recording_query_factory(
         global _captured_session_ids
         _captured_session_ids.append(kwargs.get("session_id"))
         yield AssistantMessage(
-            content=[TextBlock(text="Hi there")], model="test-model"
+            content=[TextBlock(text="Hi there from patched query")],
+            model="test-model",
         )
 
     session.query = recording_query
@@ -1444,7 +1468,7 @@ def test_user_message_uses_connection_session_id(web_server_with_pool):
                     break
 
     assert _captured_session_ids == [
-            session_id
+        session_id
     ], "session.query should receive the active connection_id as session_id"
 
 
@@ -1567,16 +1591,22 @@ def test_new_chat_does_not_inherit_context(web_server_with_pool):
         # Session A: teach a name
         with client.websocket_connect("/ws") as ws:
             skip_connection_messages(ws)
-            ws.send_json({"type": "user_message", "content": "My name is Alice"})
+            ws.send_json(
+                {"type": "user_message", "content": "My name is Alice"}
+            )
             _drain_until_complete(ws)
 
         # Session B: start fresh and ask for the name
         with client.websocket_connect("/ws") as ws2:
             skip_connection_messages(ws2)
-            ws2.send_json({"type": "user_message", "content": "What's my name?"})
+            ws2.send_json(
+                {"type": "user_message", "content": "What's my name?"}
+            )
             response_text = _collect_text_response(ws2)
 
     # Validate the mock client was reused and context was cleared
     assert _context_clients, "Mock client should be created"
-    assert _context_clients[-1].memory is None, "Memory should be cleared by /clear"
+    assert (
+        _context_clients[-1].memory is None
+    ), "Memory should be cleared by /clear"
     assert response_text == "I don't know"

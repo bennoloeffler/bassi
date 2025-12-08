@@ -56,7 +56,7 @@ def test_auto_scroll_on_agent_response(page: Page, live_server: str):
     message_input.fill("was ist ein Stofftier?")
 
     # Click send button
-    send_button = page.locator('#send-button')
+    send_button = page.locator("#send-button")
     send_button.click()
 
     # Wait for user message to appear
@@ -160,7 +160,7 @@ def test_auto_scroll_respects_user_scroll_up(page: Page, live_server: str):
     message_input.click()
     message_input.fill("tell me a long story about a teddy bear")
 
-    send_button = page.locator('#send-button')
+    send_button = page.locator("#send-button")
     send_button.click()
 
     # Wait for response to start

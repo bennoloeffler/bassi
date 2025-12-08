@@ -77,4 +77,3 @@ class BrowserSession:
     def get_model_state(self) -> dict:
         """Get the current model state for sending to client."""
         return self.model_tracker.get_state()
-

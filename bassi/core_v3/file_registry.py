@@ -13,7 +13,7 @@ Design principles:
 
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -170,7 +170,11 @@ class FileRegistry:
 
     def _save(self) -> None:
         """Save registry to disk."""
-        data = {"files": {ref: entry.to_dict() for ref, entry in self.files.items()}}
+        data = {
+            "files": {
+                ref: entry.to_dict() for ref, entry in self.files.items()
+            }
+        }
         with open(self._registry_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -223,7 +227,17 @@ class FileRegistry:
             return FileType.PRESENTATION
 
         # Code
-        if ext in [".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c", ".h"]:
+        if ext in [
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".java",
+            ".cpp",
+            ".c",
+            ".h",
+        ]:
             return FileType.CODE
 
         return FileType.OTHER
@@ -442,9 +456,13 @@ class FileRegistry:
 
         for ref, entry in self.files.items():
             source_label = (
-                f" ({entry.source.value})" if entry.source != FileSource.UPLOAD else ""
+                f" ({entry.source.value})"
+                if entry.source != FileSource.UPLOAD
+                else ""
             )
-            lines.append(f"- `@{ref}` - {entry.file_type.value}, {entry.size_human}{source_label}")
+            lines.append(
+                f"- `@{ref}` - {entry.file_type.value}, {entry.size_human}{source_label}"
+            )
 
         lines.append("")
         return "\n".join(lines)

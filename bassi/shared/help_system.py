@@ -9,10 +9,11 @@ Scans .claude/ directory for:
 Builds relationship graph and provides queries.
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
-import re
+
 import yaml
 
 
@@ -96,9 +97,7 @@ class EcosystemScanner:
         for cmd_file in commands_dir.glob("*.md"):
             try:
                 item = self._parse_markdown_file(
-                    cmd_file,
-                    item_type="command",
-                    name_override=cmd_file.stem
+                    cmd_file, item_type="command", name_override=cmd_file.stem
                 )
                 if item:
                     # Command names have slash prefix
@@ -123,7 +122,7 @@ class EcosystemScanner:
                     item = self._parse_markdown_file(
                         skill_file,
                         item_type="skill",
-                        name_override=skill_dir.name
+                        name_override=skill_dir.name,
                     )
                     if item:
                         self.items[item.name] = item
@@ -145,7 +144,7 @@ class EcosystemScanner:
                 item = self._parse_markdown_file(
                     agent_file,
                     item_type="agent",
-                    name_override=agent_file.stem
+                    name_override=agent_file.stem,
                 )
                 if item:
                     self.items[item.name] = item
@@ -156,10 +155,10 @@ class EcosystemScanner:
         self,
         file_path: Path,
         item_type: str,
-        name_override: Optional[str] = None
+        name_override: Optional[str] = None,
     ) -> Optional[HelpItem]:
         """Parse a markdown file with YAML frontmatter."""
-        content = file_path.read_text(encoding='utf-8').strip()
+        content = file_path.read_text(encoding="utf-8").strip()
 
         # Extract YAML frontmatter
         metadata = {}
@@ -183,7 +182,11 @@ class EcosystemScanner:
             # Try to get first non-empty line that's not a heading
             for line in body.split("\n"):
                 line = line.strip()
-                if line and not line.startswith("#") and not line.startswith("---"):
+                if (
+                    line
+                    and not line.startswith("#")
+                    and not line.startswith("---")
+                ):
                     description = line
                     break
 
@@ -193,28 +196,31 @@ class EcosystemScanner:
             description=description,
             file_path=str(file_path),
             metadata=metadata,
-            raw_content=content
+            raw_content=content,
         )
 
         # Extract sections from body
-        item.capabilities = self._extract_section(body, "capabilities", "when to use")
-        item.when_to_use = self._extract_section(body, "when to use", "examples")
+        item.capabilities = self._extract_section(
+            body, "capabilities", "when to use"
+        )
+        item.when_to_use = self._extract_section(
+            body, "when to use", "examples"
+        )
         item.examples = self._extract_section(body, "examples", None)
 
         return item
 
     def _extract_section(
-        self,
-        text: str,
-        start_marker: str,
-        end_marker: Optional[str] = None
+        self, text: str, start_marker: str, end_marker: Optional[str] = None
     ) -> List[str]:
         """Extract a section from markdown text."""
         items = []
 
         # Find start of section (case-insensitive, match heading level)
         start_pattern = rf"^#+\s+{re.escape(start_marker)}"
-        start_match = re.search(start_pattern, text, re.IGNORECASE | re.MULTILINE)
+        start_match = re.search(
+            start_pattern, text, re.IGNORECASE | re.MULTILINE
+        )
 
         if not start_match:
             return items
@@ -224,8 +230,14 @@ class EcosystemScanner:
 
         if end_marker:
             end_pattern = rf"^#+\s+{re.escape(end_marker)}"
-            end_match = re.search(end_pattern, text[start_pos:], re.IGNORECASE | re.MULTILINE)
-            content = text[start_pos:start_pos + end_match.start()] if end_match else text[start_pos:]
+            end_match = re.search(
+                end_pattern, text[start_pos:], re.IGNORECASE | re.MULTILINE
+            )
+            content = (
+                text[start_pos : start_pos + end_match.start()]
+                if end_match
+                else text[start_pos:]
+            )
         else:
             content = text[start_pos:]
 
@@ -267,7 +279,9 @@ class EcosystemScanner:
         # Normalize name
         normalized = name.lower().strip()
         if not normalized.startswith("/"):
-            normalized = "/" + normalized if name.startswith("/") else normalized
+            normalized = (
+                "/" + normalized if name.startswith("/") else normalized
+            )
 
         # Try exact match first
         if normalized in self.items:
@@ -287,7 +301,9 @@ class EcosystemScanner:
 
     def get_by_type(self, item_type: str) -> List[HelpItem]:
         """Get all items of a specific type."""
-        return [item for item in self.items.values() if item.type == item_type]
+        return [
+            item for item in self.items.values() if item.type == item_type
+        ]
 
     def search(self, query: str) -> List[HelpItem]:
         """Search items by name or description."""
@@ -295,10 +311,12 @@ class EcosystemScanner:
         results = []
 
         for item in self.items.values():
-            if (query_lower in item.name or
-                query_lower in item.description.lower() or
-                any(query_lower in cap for cap in item.capabilities) or
-                any(query_lower in use for use in item.when_to_use)):
+            if (
+                query_lower in item.name
+                or query_lower in item.description.lower()
+                or any(query_lower in cap for cap in item.capabilities)
+                or any(query_lower in use for use in item.when_to_use)
+            ):
                 results.append(item)
 
         return results

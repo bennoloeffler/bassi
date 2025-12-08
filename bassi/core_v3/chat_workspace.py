@@ -313,7 +313,6 @@ class ChatWorkspace:
         Raises:
             ValueError: If file exceeds size limit or registry limits exceeded
         """
-        from bassi.core_v3.file_registry import FileEntry
 
         async with self._upload_lock:
             # Validate file size
@@ -744,4 +743,3 @@ class ChatWorkspace:
 
 # Backward compatibility alias
 SessionWorkspace = ChatWorkspace
-

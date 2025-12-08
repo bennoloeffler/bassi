@@ -114,9 +114,9 @@ def test_two_browser_tabs_get_different_sessions(page, live_server):
         session2 = _wait_for_connection(page2)
 
         # Verify different session IDs
-        assert session1 != session2, (
-            f"Two tabs should have different sessions: {session1} vs {session2}"
-        )
+        assert (
+            session1 != session2
+        ), f"Two tabs should have different sessions: {session1} vs {session2}"
 
         # Send message in tab1
         _send_message(page1, "Message from tab 1")
@@ -127,9 +127,9 @@ def test_two_browser_tabs_get_different_sessions(page, live_server):
 
         # Verify tab2 does NOT have the message (isolation)
         tab2_messages = _count_user_messages(page2)
-        assert tab2_messages == 0, (
-            f"Tab2 should have 0 messages (isolation), got {tab2_messages}"
-        )
+        assert (
+            tab2_messages == 0
+        ), f"Tab2 should have 0 messages (isolation), got {tab2_messages}"
 
     finally:
         context2.close()
@@ -182,19 +182,23 @@ def test_two_concurrent_users_isolated(page, live_server):
         page_a_content = page_a.evaluate(
             "() => Array.from(document.querySelectorAll('.user-message .message-content')).map(el => el.textContent).join(' ')"
         )
-        assert "I am User A" in page_a_content, "User A should see their message"
-        assert "I am User B" not in page_a_content, (
-            "User A should NOT see User B's message"
-        )
+        assert (
+            "I am User A" in page_a_content
+        ), "User A should see their message"
+        assert (
+            "I am User B" not in page_a_content
+        ), "User A should NOT see User B's message"
 
         # Verify User B's chat content (get all user message text)
         page_b_content = page_b.evaluate(
             "() => Array.from(document.querySelectorAll('.user-message .message-content')).map(el => el.textContent).join(' ')"
         )
-        assert "I am User B" in page_b_content, "User B should see their message"
-        assert "I am User A" not in page_b_content, (
-            "User B should NOT see User A's message"
-        )
+        assert (
+            "I am User B" in page_b_content
+        ), "User B should see their message"
+        assert (
+            "I am User A" not in page_b_content
+        ), "User B should NOT see User A's message"
 
     finally:
         context_b.close()
@@ -240,9 +244,9 @@ def test_three_concurrent_users_all_isolated(page, live_server):
 
         # Verify all have different session IDs
         sessions = {session1, session2, session3}
-        assert len(sessions) == 3, (
-            f"All 3 users should have unique sessions: {sessions}"
-        )
+        assert (
+            len(sessions) == 3
+        ), f"All 3 users should have unique sessions: {sessions}"
 
         # Each user sends their identifying message
         unique_msg1 = "ALPHA_USER_MESSAGE_12345"
@@ -266,18 +270,30 @@ def test_three_concurrent_users_all_isolated(page, live_server):
 
         # User 1 isolation
         assert unique_msg1 in content1, "User 1 should see their message"
-        assert unique_msg2 not in content1, "User 1 should NOT see User 2's message"
-        assert unique_msg3 not in content1, "User 1 should NOT see User 3's message"
+        assert (
+            unique_msg2 not in content1
+        ), "User 1 should NOT see User 2's message"
+        assert (
+            unique_msg3 not in content1
+        ), "User 1 should NOT see User 3's message"
 
         # User 2 isolation
         assert unique_msg2 in content2, "User 2 should see their message"
-        assert unique_msg1 not in content2, "User 2 should NOT see User 1's message"
-        assert unique_msg3 not in content2, "User 2 should NOT see User 3's message"
+        assert (
+            unique_msg1 not in content2
+        ), "User 2 should NOT see User 1's message"
+        assert (
+            unique_msg3 not in content2
+        ), "User 2 should NOT see User 3's message"
 
         # User 3 isolation
         assert unique_msg3 in content3, "User 3 should see their message"
-        assert unique_msg1 not in content3, "User 3 should NOT see User 1's message"
-        assert unique_msg2 not in content3, "User 3 should NOT see User 2's message"
+        assert (
+            unique_msg1 not in content3
+        ), "User 3 should NOT see User 1's message"
+        assert (
+            unique_msg2 not in content3
+        ), "User 3 should NOT see User 2's message"
 
     finally:
         context2.close()
@@ -326,9 +342,9 @@ def test_page_refresh_gets_new_session(page, live_server):
 
     messages_after = _count_user_messages(page)
     # This verifies isolation - refresh should give clean state
-    assert messages_after == 0, (
-        f"After refresh should have clean chat, got {messages_after} messages"
-    )
+    assert (
+        messages_after == 0
+    ), f"After refresh should have clean chat, got {messages_after} messages"
 
 
 # =============================================================================
@@ -397,9 +413,9 @@ def test_shift_enter_creates_newline(page, live_server):
 
     # Should NOT have sent the message
     messages = _count_user_messages(page)
-    assert messages == 0, (
-        f"Shift+Enter should not send, but found {messages} messages"
-    )
+    assert (
+        messages == 0
+    ), f"Shift+Enter should not send, but found {messages} messages"
 
     # Verify input still has content (wasn't cleared)
     input_value = page.input_value("#message-input")
@@ -477,10 +493,10 @@ def test_session_appears_in_sidebar(page, live_server):
 
     # Wait for session to appear
     page.wait_for_function(
-        f"""(sid) => {{
+        """(sid) => {
             const items = document.querySelectorAll('#session-list .session-item');
             return Array.from(items).some(item => item.dataset.sessionId === sid);
-        }}""",
+        }""",
         arg=session_id,
         timeout=10000,
     )
@@ -538,7 +554,9 @@ def test_input_cleared_after_send(page, live_server):
 
     # Input should be empty
     input_value = page.input_value("#message-input")
-    assert input_value == "", f"Input should be empty after send, got: '{input_value}'"
+    assert (
+        input_value == ""
+    ), f"Input should be empty after send, got: '{input_value}'"
 
 
 # =============================================================================
@@ -624,9 +642,9 @@ def test_max_concurrent_users_all_work(page, live_server):
             sessions.add(session)
 
         # All should have unique sessions
-        assert len(sessions) == max_users, (
-            f"All {max_users} users should have unique sessions, got {len(sessions)}"
-        )
+        assert (
+            len(sessions) == max_users
+        ), f"All {max_users} users should have unique sessions, got {len(sessions)}"
 
     finally:
         # Only close the contexts we created (not the fixture's context)

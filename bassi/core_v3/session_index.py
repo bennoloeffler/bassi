@@ -10,12 +10,11 @@ Migration:
     # Old
     from bassi.core_v3.session_index import SessionIndex
     index = SessionIndex(base_path)
-    
+
     # New
     from bassi.core_v3.chat_index import ChatIndex
     index = ChatIndex(base_path)
 """
-
 
 # Re-export ChatIndex as SessionIndex for backward compatibility
 from bassi.core_v3.chat_index import ChatIndex

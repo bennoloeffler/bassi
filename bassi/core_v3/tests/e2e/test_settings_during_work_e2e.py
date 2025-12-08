@@ -40,7 +40,8 @@ def _wait_for_connection(page):
 
 def _setup_console_error_capture(page):
     """Set up console error capturing for a page."""
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             window._consoleErrors = [];
             const originalError = console.error;
@@ -49,19 +50,22 @@ def _setup_console_error_capture(page):
                 originalError.apply(console, args);
             };
         }
-    """)
+    """
+    )
 
 
 def _get_console_errors(page) -> list[str]:
     """Get any console errors from the page."""
-    errors = page.evaluate("""
+    errors = page.evaluate(
+        """
         () => {
             if (window._consoleErrors) {
                 return window._consoleErrors;
             }
             return [];
         }
-    """)
+    """
+    )
     return errors or []
 
 
@@ -147,7 +151,8 @@ def test_session_switch_blocked_during_agent_work(page, live_server):
     assert is_working is True, "Should have set isAgentWorking to true"
 
     # Attempt to switch back to first session while "agent is working"
-    result = page.evaluate(f"""
+    result = page.evaluate(
+        f"""
         async () => {{
             try {{
                 const beforeSession = window.bassiClient.sessionId;
@@ -162,7 +167,8 @@ def test_session_switch_blocked_during_agent_work(page, live_server):
                 return {{ error: e.message }};
             }}
         }}
-    """)
+    """
+    )
 
     # Verify session switch was blocked (session ID unchanged)
     assert result.get("blocked") is True, (
@@ -179,7 +185,8 @@ def test_session_switch_blocked_during_agent_work(page, live_server):
     )
 
     # Now verify session CAN be switched when agent is not working
-    result_after = page.evaluate(f"""
+    result_after = page.evaluate(
+        f"""
         async () => {{
             try {{
                 await window.bassiClient.switchSession('{first_session_id}');
@@ -188,7 +195,8 @@ def test_session_switch_blocked_during_agent_work(page, live_server):
                 return {{ error: e.message }};
             }}
         }}
-    """)
+    """
+    )
 
     # Wait for switch to complete
     page.wait_for_selector(
@@ -197,7 +205,9 @@ def test_session_switch_blocked_during_agent_work(page, live_server):
 
     # Verify we're now in first session
     current_session = page.evaluate("() => window.bassiClient?.sessionId")
-    assert current_session == first_session_id, "Should have switched to first session"
+    assert (
+        current_session == first_session_id
+    ), "Should have switched to first session"
 
 
 # =============================================================================
@@ -227,7 +237,9 @@ def test_model_change_blocked_during_agent_work(page, live_server):
     _setup_console_error_capture(page)
 
     # Capture initial model level
-    initial_model = page.evaluate("() => window.bassiClient?.currentModelLevel")
+    initial_model = page.evaluate(
+        "() => window.bassiClient?.currentModelLevel"
+    )
 
     # Force isAgentWorking to true to simulate agent processing
     page.evaluate("() => { window.bassiClient.isAgentWorking = true; }")
@@ -237,7 +249,8 @@ def test_model_change_blocked_during_agent_work(page, live_server):
     assert is_working is True, "Should have set isAgentWorking to true"
 
     # Attempt to change model level while "agent is working"
-    result = page.evaluate("""
+    result = page.evaluate(
+        """
         async () => {
             try {
                 const beforeLevel = window.bassiClient.currentModelLevel;
@@ -252,7 +265,8 @@ def test_model_change_blocked_during_agent_work(page, live_server):
                 return { error: e.message };
             }
         }
-    """)
+    """
+    )
 
     # Verify model change was blocked (level unchanged)
     assert result.get("blocked") is True, (
@@ -261,9 +275,12 @@ def test_model_change_blocked_during_agent_work(page, live_server):
     )
 
     # Check for warning notification
-    notification = page.query_selector(".notification.warning, .toast.warning, [class*='notification'][class*='warning']")
+    notification = page.query_selector(
+        ".notification.warning, .toast.warning, [class*='notification'][class*='warning']"
+    )
     # Also check notification text contains the expected message
-    notification_text = page.evaluate("""
+    notification_text = page.evaluate(
+        """
         () => {
             const notifs = document.querySelectorAll('.notification, .toast, [class*="notification"]');
             for (const n of notifs) {
@@ -273,7 +290,8 @@ def test_model_change_blocked_during_agent_work(page, live_server):
             }
             return null;
         }
-    """)
+    """
+    )
 
     # Reset isAgentWorking
     page.evaluate("() => { window.bassiClient.isAgentWorking = false; }")
@@ -284,7 +302,8 @@ def test_model_change_blocked_during_agent_work(page, live_server):
     )
 
     # Now verify model CAN be changed when agent is not working
-    result_after = page.evaluate("""
+    result_after = page.evaluate(
+        """
         async () => {
             try {
                 await window.bassiClient.updateModelLevel('fast');
@@ -293,9 +312,12 @@ def test_model_change_blocked_during_agent_work(page, live_server):
                 return { error: e.message };
             }
         }
-    """)
+    """
+    )
 
-    assert result_after.get("success") is True, "Model change should work when agent not working"
+    assert (
+        result_after.get("success") is True
+    ), "Model change should work when agent not working"
 
 
 # =============================================================================
@@ -344,17 +366,25 @@ def test_settings_modal_during_agent_work(page, live_server):
     modal = page.wait_for_selector(
         "#settings-modal", state="visible", timeout=5000
     )
-    assert modal is not None, "Settings modal should open even during agent work"
+    assert (
+        modal is not None
+    ), "Settings modal should open even during agent work"
 
     # Verify modal contains expected elements
-    model_selector = page.query_selector("#settings-modal select, #settings-modal [data-model-level]")
+    model_selector = page.query_selector(
+        "#settings-modal select, #settings-modal [data-model-level]"
+    )
     # Modal might have different structure, just verify it's visible
 
     # Modal is open - verify system didn't crash
     # Check for console errors
     errors = _get_console_errors(page)
-    critical_errors = [e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()]
-    assert len(critical_errors) == 0, f"Opening modal shouldn't cause errors: {critical_errors}"
+    critical_errors = [
+        e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()
+    ]
+    assert (
+        len(critical_errors) == 0
+    ), f"Opening modal shouldn't cause errors: {critical_errors}"
 
     # Close modal
     close_btn = page.query_selector("#settings-modal .modal-close-btn")
@@ -417,7 +447,9 @@ def test_toggle_thinking_blocked_during_agent_work(page, live_server):
         pytest.skip("Thinking toggle not found")
 
     # Capture initial checkbox state
-    initial_checked = page.evaluate("() => document.getElementById('thinking-toggle')?.checked || false")
+    initial_checked = page.evaluate(
+        "() => document.getElementById('thinking-toggle')?.checked || false"
+    )
 
     # Force isAgentWorking to true (simulate agent working)
     page.evaluate("() => { window.bassiClient.isAgentWorking = true; }")
@@ -428,20 +460,24 @@ def test_toggle_thinking_blocked_during_agent_work(page, live_server):
 
     # Attempt to toggle thinking checkbox using JavaScript
     # (the checkbox is hidden via CSS, so we need to click it via JS)
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             const toggle = document.getElementById('thinking-toggle');
             if (toggle) {
                 toggle.click();  // This triggers the change event with the guard
             }
         }
-    """)
+    """
+    )
 
     # Brief pause for guard to process
     page.wait_for_timeout(100)
 
     # Verify checkbox reverted to original state (guard blocked it)
-    after_checked = page.evaluate("() => document.getElementById('thinking-toggle')?.checked || false")
+    after_checked = page.evaluate(
+        "() => document.getElementById('thinking-toggle')?.checked || false"
+    )
     assert after_checked == initial_checked, (
         f"Thinking toggle should be blocked during agent work. "
         f"Expected {initial_checked}, got {after_checked}"
@@ -449,9 +485,13 @@ def test_toggle_thinking_blocked_during_agent_work(page, live_server):
 
     # Verify warning was logged (guard activated)
     logs = page.evaluate("() => window._capturedLogs || []")
-    blocking_log = [log for log in logs if "blocking thinking toggle" in log.lower()]
+    blocking_log = [
+        log for log in logs if "blocking thinking toggle" in log.lower()
+    ]
     # Guard should have logged the block
-    assert len(blocking_log) > 0 or True, "Guard should log blocking message"  # relaxed assertion
+    assert (
+        len(blocking_log) > 0 or True
+    ), "Guard should log blocking message"  # relaxed assertion
 
     # Cleanup: reset isAgentWorking
     page.evaluate("() => { window.bassiClient.isAgentWorking = false; }")
@@ -482,7 +522,9 @@ def test_toggle_auto_escalate_blocked_during_agent_work(page, live_server):
     _setup_console_error_capture(page)
 
     # Capture initial auto-escalate value
-    initial_value = page.evaluate("() => window.bassiClient?.autoEscalate || false")
+    initial_value = page.evaluate(
+        "() => window.bassiClient?.autoEscalate || false"
+    )
 
     # Force isAgentWorking to true to simulate agent processing
     page.evaluate("() => { window.bassiClient.isAgentWorking = true; }")
@@ -492,7 +534,8 @@ def test_toggle_auto_escalate_blocked_during_agent_work(page, live_server):
     assert is_working is True, "Should have set isAgentWorking to true"
 
     # Attempt to toggle auto-escalate while "agent is working"
-    result = page.evaluate("""
+    result = page.evaluate(
+        """
         async () => {
             try {
                 const beforeValue = window.bassiClient.autoEscalate || false;
@@ -507,7 +550,8 @@ def test_toggle_auto_escalate_blocked_during_agent_work(page, live_server):
                 return { error: e.message };
             }
         }
-    """)
+    """
+    )
 
     # Verify auto-escalate change was blocked (value unchanged)
     assert result.get("blocked") is True, (
@@ -524,7 +568,8 @@ def test_toggle_auto_escalate_blocked_during_agent_work(page, live_server):
     )
 
     # Verify auto-escalate CAN be changed when agent is not working
-    result_after = page.evaluate("""
+    result_after = page.evaluate(
+        """
         async () => {
             try {
                 const beforeValue = window.bassiClient.autoEscalate || false;
@@ -535,9 +580,12 @@ def test_toggle_auto_escalate_blocked_during_agent_work(page, live_server):
                 return { error: e.message };
             }
         }
-    """)
+    """
+    )
 
-    assert result_after.get("success") is True, "Auto-escalate toggle should work when agent not working"
+    assert (
+        result_after.get("success") is True
+    ), "Auto-escalate toggle should work when agent not working"
 
 
 # =============================================================================
@@ -574,43 +622,59 @@ def test_multiple_settings_changes_during_work(page, live_server):
     initial_hidden = page.evaluate(
         "() => document.body.classList.contains('hide-thinking')"
     )
-    page.evaluate("() => { document.body.classList.toggle('hide-thinking'); }")
+    page.evaluate(
+        "() => { document.body.classList.toggle('hide-thinking'); }"
+    )
     after_hidden = page.evaluate(
         "() => document.body.classList.contains('hide-thinking')"
     )
-    assert after_hidden != initial_hidden, "Thinking toggle should work during agent work"
+    assert (
+        after_hidden != initial_hidden
+    ), "Thinking toggle should work during agent work"
 
     # SAFE: Open settings modal (just viewing)
     settings_button = page.query_selector("#settings-button")
     if settings_button:
         page.click("#settings-button")
-        page.wait_for_selector("#settings-modal", state="visible", timeout=3000)
+        page.wait_for_selector(
+            "#settings-modal", state="visible", timeout=3000
+        )
         page.keyboard.press("Escape")
-        page.wait_for_selector("#settings-modal", state="hidden", timeout=3000)
+        page.wait_for_selector(
+            "#settings-modal", state="hidden", timeout=3000
+        )
 
     # === Phase 2: Blocked operations during agent work ===
 
     # BLOCKED: Model change attempt
-    model_result = page.evaluate("""
+    model_result = page.evaluate(
+        """
         async () => {
             const before = window.bassiClient.currentModelLevel;
             await window.bassiClient.updateModelLevel('fast');
             const after = window.bassiClient.currentModelLevel;
             return { blocked: before === after };
         }
-    """)
-    assert model_result.get("blocked") is True, "Model change should be blocked"
+    """
+    )
+    assert (
+        model_result.get("blocked") is True
+    ), "Model change should be blocked"
 
     # BLOCKED: Auto-escalate toggle attempt
-    escalate_result = page.evaluate("""
+    escalate_result = page.evaluate(
+        """
         async () => {
             const before = window.bassiClient.autoEscalate || false;
             await window.bassiClient.updateAutoEscalate(!before);
             const after = window.bassiClient.autoEscalate || false;
             return { blocked: before === after };
         }
-    """)
-    assert escalate_result.get("blocked") is True, "Auto-escalate should be blocked"
+    """
+    )
+    assert (
+        escalate_result.get("blocked") is True
+    ), "Auto-escalate should be blocked"
 
     # === Phase 3: Reset and verify stability ===
 
@@ -629,21 +693,28 @@ def test_multiple_settings_changes_during_work(page, live_server):
     # No critical console errors
     errors = _get_console_errors(page)
     critical_errors = [
-        e for e in errors
-        if "uncaught" in e.lower() or "fatal" in e.lower() or "exception" in e.lower()
+        e
+        for e in errors
+        if "uncaught" in e.lower()
+        or "fatal" in e.lower()
+        or "exception" in e.lower()
     ]
     assert len(critical_errors) == 0, f"No critical errors: {critical_errors}"
 
     # === Phase 4: Verify operations work after agent done ===
 
     # Model change should work now
-    model_after = page.evaluate("""
+    model_after = page.evaluate(
+        """
         async () => {
             await window.bassiClient.updateModelLevel('fast');
             return { success: true };
         }
-    """)
-    assert model_after.get("success") is True, "Model change should work after agent done"
+    """
+    )
+    assert (
+        model_after.get("success") is True
+    ), "Model change should work after agent done"
 
     # Send a message to verify system functional
     page.fill("#message-input", "Post-stress-test verification")
@@ -656,4 +727,6 @@ def test_multiple_settings_changes_during_work(page, live_server):
 
     # Verify agent responded
     assistant_messages = page.query_selector_all(".assistant-message")
-    assert len(assistant_messages) > 0, "Agent should respond after stress test"
+    assert (
+        len(assistant_messages) > 0
+    ), "Agent should respond after stress test"

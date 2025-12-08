@@ -4,13 +4,12 @@ Tests for the enhanced help system.
 Tests ecosystem scanner, help formatter, and integration.
 """
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from textwrap import dedent
 
-from bassi.shared.help_system import EcosystemScanner, HelpItem
 from bassi.shared.help_formatter import HelpFormatter, format_help
+from bassi.shared.help_system import EcosystemScanner, HelpItem
 
 
 class TestHelpItem:
@@ -22,7 +21,7 @@ class TestHelpItem:
             type="skill",
             name="Test Skill",
             description="A test skill",
-            file_path="/path/to/file"
+            file_path="/path/to/file",
         )
         assert item.type == "skill"
         assert item.name == "test skill"  # Should be normalized
@@ -39,7 +38,7 @@ class TestHelpItem:
             type="skill",
             name="pdf",
             description="PDF tool",
-            related_items=["docx", "xlsx"]
+            related_items=["docx", "xlsx"],
         )
         assert len(item.related_items) == 2
         assert "docx" in item.related_items
@@ -102,8 +101,12 @@ class TestEcosystemScanner:
 
     def test_parse_markdown_with_frontmatter(self):
         """Test parsing markdown with YAML frontmatter."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
-            f.write(dedent("""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        ) as f:
+            f.write(
+                dedent(
+                    """
                 ---
                 name: test-skill
                 description: A test skill for unit tests
@@ -120,14 +123,16 @@ class TestEcosystemScanner:
                 ## When to Use
                 - When you need to test
                 - When you're learning
-            """))
+            """
+                )
+            )
             f.flush()
 
             scanner = EcosystemScanner()
             item = scanner._parse_markdown_file(
                 Path(f.name),
                 item_type="skill",
-                name_override="test-skill"  # Override with the expected name
+                name_override="test-skill",  # Override with the expected name
             )
 
             assert item is not None
@@ -172,7 +177,7 @@ class TestHelpFormatter:
             description="PDF manipulation tool",
             capabilities=["Create PDFs", "Edit PDFs"],
             when_to_use=["When you need PDF operations"],
-            examples=["Create a PDF from images"]
+            examples=["Create a PDF from images"],
         )
         formatter = HelpFormatter()
         result = formatter.format_item(item)
@@ -186,7 +191,7 @@ class TestHelpFormatter:
         item = HelpItem(
             type="skill",
             name="xlsx",
-            description="Spreadsheet tool for Excel files"
+            description="Spreadsheet tool for Excel files",
         )
         formatter = HelpFormatter()
         result = formatter.format_item_brief(item, index=1)
@@ -198,7 +203,9 @@ class TestHelpFormatter:
         """Test formatting multiple items."""
         items = [
             HelpItem(type="skill", name="pdf", description="PDF tool"),
-            HelpItem(type="skill", name="xlsx", description="Spreadsheet tool"),
+            HelpItem(
+                type="skill", name="xlsx", description="Spreadsheet tool"
+            ),
             HelpItem(type="command", name="crm", description="CRM command"),
         ]
         formatter = HelpFormatter()
@@ -355,7 +362,9 @@ class TestIntegration:
                 assert len(skills_output) > 0
 
             if commands:
-                commands_output = formatter.format_items_list(commands, "Commands")
+                commands_output = formatter.format_items_list(
+                    commands, "Commands"
+                )
                 assert len(commands_output) > 0
 
     def test_scanner_and_formatter_together(self):

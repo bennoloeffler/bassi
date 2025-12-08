@@ -8,4 +8,3 @@ Contains data models for:
 from bassi.core_v3.models.browser_session import BrowserSession
 
 __all__ = ["BrowserSession"]
-

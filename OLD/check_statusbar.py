@@ -5,10 +5,9 @@ Demo of the status bar feature
 
 import time
 
+from bassi.status_bar import create_status_bar
 from rich.console import Console
 from rich.panel import Panel
-
-from bassi.status_bar import create_status_bar
 
 console = Console()
 

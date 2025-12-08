@@ -22,7 +22,10 @@ from fastapi.websockets import WebSocketDisconnect
 
 from bassi.core_v3.chat_workspace import ChatWorkspace
 from bassi.core_v3.models.browser_session import BrowserSession
-from bassi.core_v3.services.agent_pool import AgentPool, PoolExhaustedException
+from bassi.core_v3.services.agent_pool import (
+    AgentPool,
+    PoolExhaustedException,
+)
 from bassi.core_v3.tools import InteractiveQuestionService
 
 logger = logging.getLogger(__name__)

@@ -49,6 +49,7 @@ from bassi.core_v3.websocket.browser_session_manager import (
 
 logger = logging.getLogger(__name__)
 
+
 class WebUIServerV3:
     """
     FastAPI server for bassi web UI with Agent Pool architecture.
@@ -166,6 +167,7 @@ class WebUIServerV3:
 
     def _create_app(self) -> FastAPI:
         """Create and configure FastAPI application."""
+
         # Lifespan context manager for startup/shutdown (replaces deprecated on_event)
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -189,7 +191,9 @@ class WebUIServerV3:
             await self.agent_pool.shutdown()
             logger.info("✅ [SERVER] Agent pool shutdown complete")
 
-        app = FastAPI(title="Bassi Web UI", version="3.0.0", lifespan=lifespan)
+        app = FastAPI(
+            title="Bassi Web UI", version="3.0.0", lifespan=lifespan
+        )
 
         # CORS middleware
         app.add_middleware(

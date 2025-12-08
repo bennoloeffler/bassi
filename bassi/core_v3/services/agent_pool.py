@@ -43,7 +43,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 from bassi.config import PoolConfig, get_pool_config
 from bassi.core_v3.agent_session import BassiAgentSession
@@ -218,13 +218,17 @@ class AgentPool:
         self._shutdown = False
         self._warmup_task: Optional[asyncio.Task] = None
         self._growth_task: Optional[asyncio.Task] = None
-        self._growth_in_progress = 0  # Number of agents currently being created
+        self._growth_in_progress = (
+            0  # Number of agents currently being created
+        )
 
         # Stats
         self._total_acquires = 0
         self._total_releases = 0
         self._acquire_wait_times: list[float] = []
-        self._agents_created_on_demand = 0  # Agents created because pool was exhausted
+        self._agents_created_on_demand = (
+            0  # Agents created because pool was exhausted
+        )
 
     async def start(self) -> None:
         """
@@ -272,8 +276,12 @@ class AgentPool:
 
         # Clamp initial_size to max_size (can't start with more than max allows)
         initial_size = min(self.config.initial_size, self.config.max_size)
-        print(f"🏊🏊🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})...")
-        logger.info(f"🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})...")
+        print(
+            f"🏊🏊🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})..."
+        )
+        logger.info(
+            f"🏊 [POOL] Starting with {initial_size} agents (max: {self.config.max_size})..."
+        )
         start_time = time.time()
 
         # Create and connect first agent (blocking)
@@ -343,7 +351,9 @@ class AgentPool:
                     self._agents.append(PooledAgent(agent=agent))
 
                 created += 1
-                logger.debug(f"✅ [POOL] Agent {len(self._agents)}/{self.config.initial_size} ready")
+                logger.debug(
+                    f"✅ [POOL] Agent {len(self._agents)}/{self.config.initial_size} ready"
+                )
 
                 # Signal that a new agent is available
                 async with self._available:
@@ -371,7 +381,7 @@ class AgentPool:
         total_with_growing = current + self._growth_in_progress
 
         if self._shutdown:
-            logger.debug(f"📊 [POOL] _should_grow: NO (shutdown)")
+            logger.debug("📊 [POOL] _should_grow: NO (shutdown)")
             return False
         if total_with_growing >= self.config.max_size:
             logger.debug(
@@ -401,7 +411,9 @@ class AgentPool:
         current = len(self._agents)
         idle = self._get_idle_count()
         needed = self.config.keep_idle_size - idle
-        max_can_create = self.config.max_size - current - self._growth_in_progress
+        max_can_create = (
+            self.config.max_size - current - self._growth_in_progress
+        )
         to_create = min(needed, max_can_create)
 
         logger.info(
@@ -424,11 +436,13 @@ class AgentPool:
     async def _grow_agents(self, count: int) -> None:
         """Create additional agents in background."""
         created = 0
-        logger.info(f"🌱 [POOL] _grow_agents: starting to create {count} agents")
+        logger.info(
+            f"🌱 [POOL] _grow_agents: starting to create {count} agents"
+        )
 
         for i in range(count):
             if self._shutdown:
-                logger.info(f"🌱 [POOL] _grow_agents: stopped (shutdown)")
+                logger.info("🌱 [POOL] _grow_agents: stopped (shutdown)")
                 break
             current = len(self._agents)
             if current >= self.config.max_size:
@@ -440,14 +454,16 @@ class AgentPool:
 
             try:
                 self._growth_in_progress += 1
-                logger.debug(f"🌱 [POOL] Growing: creating agent...")
+                logger.debug("🌱 [POOL] Growing: creating agent...")
                 agent = await self._create_and_connect_agent()
 
                 async with self._lock:
                     self._agents.append(PooledAgent(agent=agent))
 
                 created += 1
-                logger.info(f"✅ [POOL] Grew pool: now {len(self._agents)} agents")
+                logger.info(
+                    f"✅ [POOL] Grew pool: now {len(self._agents)} agents"
+                )
 
                 # Signal that a new agent is available
                 async with self._available:
@@ -573,7 +589,9 @@ class AgentPool:
                         try:
                             on_creating()
                         except Exception as e:
-                            logger.warning(f"on_creating callback failed: {e}")
+                            logger.warning(
+                                f"on_creating callback failed: {e}"
+                            )
 
                     # Create new agent synchronously
                     try:
@@ -628,7 +646,9 @@ class AgentPool:
                         timeout=2.0,
                     )
                     # An agent was released! Loop back and try to acquire it
-                    logger.info("✅ [POOL] Agent released during wait, retrying acquire...")
+                    logger.info(
+                        "✅ [POOL] Agent released during wait, retrying acquire..."
+                    )
                     continue
                 except asyncio.TimeoutError:
                     # After brief wait, still no agent available - fail
@@ -828,25 +848,20 @@ class AgentPool:
             "in_use": in_use,
             "available": available,
             "utilization": in_use / total if total > 0 else 0,
-
             # Configuration
             "initial_size": self.config.initial_size,
             "max_size": self.config.max_size,
             "keep_idle_size": self.config.keep_idle_size,
-
             # Dynamic sizing
             "growth_in_progress": self._growth_in_progress,
             "agents_created_on_demand": self._agents_created_on_demand,
-
             # Cumulative stats
             "total_acquires": self._total_acquires,
             "total_releases": self._total_releases,
             "avg_acquire_wait_ms": round(avg_wait_ms, 2),
-
             # Lifecycle
             "started": self._started,
             "shutdown": self._shutdown,
-
             # Backward compatibility
             "size": self.config.initial_size,
         }

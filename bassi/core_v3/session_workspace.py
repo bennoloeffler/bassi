@@ -10,12 +10,11 @@ Migration:
     # Old
     from bassi.core_v3.session_workspace import SessionWorkspace
     workspace = SessionWorkspace(session_id, ...)
-    
-    # New  
+
+    # New
     from bassi.core_v3.chat_workspace import ChatWorkspace
     workspace = ChatWorkspace(chat_id, ...)
 """
-
 
 # Re-export ChatWorkspace as SessionWorkspace for backward compatibility
 from bassi.core_v3.chat_workspace import ChatWorkspace

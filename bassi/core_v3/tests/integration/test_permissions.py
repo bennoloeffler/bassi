@@ -13,7 +13,6 @@ Based on documented requirements in:
 - TOOL_PERMISSIONS_IMPLEMENTATION_PLAN.md
 """
 
-
 import pytest
 
 from bassi.core_v3.agent_session import BassiAgentSession, SessionConfig

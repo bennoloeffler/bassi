@@ -9,11 +9,10 @@ DEPENDENCIES: HelpFormatter from bassi.shared
 """
 
 import logging
+from time import perf_counter
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-
-from time import perf_counter
 
 from bassi.shared.help_formatter import format_help
 from bassi.shared.help_system import EcosystemScanner
@@ -56,10 +55,14 @@ def create_help_router() -> APIRouter:
             scanner = EcosystemScanner()
             scanner.scan_all()
 
-            help_text = format_help(normalized_query, width=80, scanner=scanner)
+            help_text = format_help(
+                normalized_query, width=80, scanner=scanner
+            )
             help_items = [item.to_dict() for item in scanner.items.values()]
             help_items_by_type = {
-                item_type: [item.to_dict() for item in scanner.get_by_type(item_type)]
+                item_type: [
+                    item.to_dict() for item in scanner.get_by_type(item_type)
+                ]
                 for item_type in ("command", "skill", "agent")
             }
             counts = {

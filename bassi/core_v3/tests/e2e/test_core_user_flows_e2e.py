@@ -73,9 +73,7 @@ def test_user_can_send_message_and_receive_response(page, live_server):
     page.wait_for_selector(".assistant-message", timeout=30000)
 
     # Verify agent has some text content
-    agent_message = page.query_selector(
-        ".assistant-message .message-content"
-    )
+    agent_message = page.query_selector(".assistant-message .message-content")
     assert agent_message is not None, "Agent should have responded"
 
     text = agent_message.text_content()
@@ -114,9 +112,9 @@ def test_user_can_see_connection_status(page, live_server):
 
     # Verify the text
     status_text = status_indicator.text_content()
-    assert "Connected" in status_text, (
-        f"Status should show 'Connected', got: {status_text}"
-    )
+    assert (
+        "Connected" in status_text
+    ), f"Status should show 'Connected', got: {status_text}"
 
 
 # =============================================================================
@@ -185,15 +183,17 @@ def test_user_can_see_agent_thinking_indicator(page, live_server):
     # Verify the thinking indicator mechanism exists
     # 1. Check stop button exists (it's hidden until agent is working)
     stop_button = page.query_selector("#stop-button")
-    assert stop_button is not None, "Stop button should exist for interrupting agent"
+    assert (
+        stop_button is not None
+    ), "Stop button should exist for interrupting agent"
 
     # 2. Check that isAgentWorking property exists and starts as false
     is_working_initial = page.evaluate(
         "() => window.bassiClient?.isAgentWorking"
     )
-    assert is_working_initial is False, (
-        "isAgentWorking should be false before sending"
-    )
+    assert (
+        is_working_initial is False
+    ), "isAgentWorking should be false before sending"
 
     # 3. Send a message and verify agent responds (proves the pipeline works)
     page.fill("#message-input", "Tell me something")
@@ -252,9 +252,9 @@ def test_user_can_start_new_chat(page, live_server):
     new_session_id = handle.json_value()
 
     assert new_session_id is not None, "Should have new session ID"
-    assert new_session_id != first_session_id, (
-        "New session should have different ID"
-    )
+    assert (
+        new_session_id != first_session_id
+    ), "New session should have different ID"
 
     # Verify chat is cleared (no messages)
     message_count = page.evaluate(
@@ -307,10 +307,10 @@ def test_user_can_see_chat_in_sidebar(page, live_server):
 
     # Wait for session to appear in list
     page.wait_for_function(
-        f"""(sid) => {{
+        """(sid) => {
             const items = document.querySelectorAll('#session-list .session-item');
             return Array.from(items).some(item => item.dataset.sessionId === sid);
-        }}""",
+        }""",
         arg=session_id,
         timeout=10000,
     )
@@ -318,13 +318,12 @@ def test_user_can_see_chat_in_sidebar(page, live_server):
     # Verify the session item exists
     session_items = page.query_selector_all("#session-list .session-item")
     session_ids = [
-        item.get_attribute("data-session-id")
-        for item in session_items
+        item.get_attribute("data-session-id") for item in session_items
     ]
 
-    assert session_id in session_ids, (
-        f"Session {session_id} should appear in sidebar"
-    )
+    assert (
+        session_id in session_ids
+    ), f"Session {session_id} should appear in sidebar"
 
 
 # =============================================================================
@@ -363,9 +362,9 @@ def test_input_clears_after_sending(page, live_server):
 
     # Verify input is cleared
     input_value_after = page.input_value("#message-input")
-    assert input_value_after == "", (
-        f"Input should be empty after sending, got: '{input_value_after}'"
-    )
+    assert (
+        input_value_after == ""
+    ), f"Input should be empty after sending, got: '{input_value_after}'"
 
 
 # =============================================================================
@@ -428,6 +427,4 @@ def test_page_has_bassi_title(page, live_server):
     page.wait_for_load_state("domcontentloaded")
 
     title = page.title()
-    assert title is not None and len(title) > 0, (
-        "Page should have a title"
-    )
+    assert title is not None and len(title) > 0, "Page should have a title"

@@ -53,14 +53,13 @@ class TestAgentPoolRelease:
     """Tests for agent release (destroy and replace model)."""
 
     @pytest.mark.asyncio
-    async def test_release_removes_agent_from_pool(
-        self, mock_agent
-    ):
+    async def test_release_removes_agent_from_pool(self, mock_agent):
         """
         Test that releasing an agent REMOVES it from the pool.
 
         With destroy-and-replace model, agents are not reused.
         """
+
         # Use a factory that creates DISTINCT agents (not the released one)
         def factory():
             agent = MagicMock()
@@ -87,9 +86,9 @@ class TestAgentPoolRelease:
         await asyncio.sleep(0.1)
 
         # Agent should be removed from pool (replacement is a different agent)
-        assert all(p.agent is not mock_agent for p in pool._agents), (
-            "Released agent should be removed from pool"
-        )
+        assert all(
+            p.agent is not mock_agent for p in pool._agents
+        ), "Released agent should be removed from pool"
 
     @pytest.mark.asyncio
     async def test_release_calls_disconnect(
@@ -111,9 +110,7 @@ class TestAgentPoolRelease:
         mock_agent.disconnect.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_release_creates_replacement_agent(
-        self, mock_agent
-    ):
+    async def test_release_creates_replacement_agent(self, mock_agent):
         """Test that releasing an agent triggers creation of a replacement."""
         from bassi.config import PoolConfig
 
@@ -141,9 +138,9 @@ class TestAgentPoolRelease:
         await asyncio.sleep(0.2)
 
         # A replacement agent should have been created
-        assert len(agents_created) > initial_count, (
-            "Replacement agent should be created after release"
-        )
+        assert (
+            len(agents_created) > initial_count
+        ), "Replacement agent should be created after release"
 
     @pytest.mark.asyncio
     async def test_release_increments_total_releases(
@@ -206,6 +203,7 @@ class TestAgentPoolContextIsolation:
             return agent
 
         from bassi.config import PoolConfig
+
         config = PoolConfig(initial_size=1, keep_idle_size=1, max_size=3)
         pool = AgentPool(agent_factory=factory, pool_config=config)
         pool._started = True
@@ -232,12 +230,12 @@ class TestAgentPoolContextIsolation:
         agent_b = await pool.acquire("browser-B")
 
         # Agent B should be fresh (from factory)
-        assert agent_b._conversation_context is None, (
-            "New agent should have no conversation context"
-        )
-        assert agent_b.message_history == [], (
-            "New agent should have empty message history"
-        )
+        assert (
+            agent_b._conversation_context is None
+        ), "New agent should have no conversation context"
+        assert (
+            agent_b.message_history == []
+        ), "New agent should have empty message history"
 
 
 class TestAgentPoolDynamicSizing:
@@ -281,7 +279,11 @@ class TestAgentPoolDynamicSizing:
 
         # Manually set up pool with one agent in use
         first_agent = self._create_mock_agent()
-        pool._agents.append(PooledAgent(agent=first_agent, in_use=True, browser_id="browser-1"))
+        pool._agents.append(
+            PooledAgent(
+                agent=first_agent, in_use=True, browser_id="browser-1"
+            )
+        )
         pool._started = True
 
         # Track if callback was called
@@ -294,15 +296,18 @@ class TestAgentPoolDynamicSizing:
         # Acquire should trigger on_creating since no agent available
         agent = await pool.acquire("browser-2", on_creating=on_creating)
 
-        assert callback_called, "on_creating callback should be called when creating new agent"
+        assert (
+            callback_called
+        ), "on_creating callback should be called when creating new agent"
         assert agent is not None
         assert len(pool._agents) == 2
 
     @pytest.mark.asyncio
     async def test_max_size_limit_respected(self):
         """Test that pool respects max_size limit after brief wait."""
-        from bassi.config import PoolConfig
         import time
+
+        from bassi.config import PoolConfig
 
         def factory():
             return self._create_mock_agent()
@@ -312,8 +317,16 @@ class TestAgentPoolDynamicSizing:
         pool = AgentPool(agent_factory=factory, pool_config=config)
 
         # Pre-populate with 2 agents (at max), both in use
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True, browser_id="b1"))
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True, browser_id="b2"))
+        pool._agents.append(
+            PooledAgent(
+                agent=self._create_mock_agent(), in_use=True, browser_id="b1"
+            )
+        )
+        pool._agents.append(
+            PooledAgent(
+                agent=self._create_mock_agent(), in_use=True, browser_id="b2"
+            )
+        )
         pool._started = True
 
         # Try to acquire third - should wait briefly (2s) then raise PoolExhaustedException
@@ -331,7 +344,9 @@ class TestAgentPoolDynamicSizing:
         assert exc_info.value.in_use == 2
 
     @pytest.mark.asyncio
-    async def test_acquire_succeeds_when_replacement_created_during_wait(self):
+    async def test_acquire_succeeds_when_replacement_created_during_wait(
+        self,
+    ):
         """Test that acquire succeeds when a replacement agent becomes available.
 
         With destroy-and-replace model:
@@ -340,8 +355,9 @@ class TestAgentPoolDynamicSizing:
         3. Old browser releases agent (triggers replacement creation)
         4. Waiting browser gets the replacement agent
         """
-        from bassi.config import PoolConfig
         import time
+
+        from bassi.config import PoolConfig
 
         agents_created = []
 
@@ -357,8 +373,12 @@ class TestAgentPoolDynamicSizing:
         # Pre-populate with 2 agents (at max), both in use
         agent1 = self._create_mock_agent()
         agent2 = self._create_mock_agent()
-        pool._agents.append(PooledAgent(agent=agent1, in_use=True, browser_id="b1"))
-        pool._agents.append(PooledAgent(agent=agent2, in_use=True, browser_id="b2"))
+        pool._agents.append(
+            PooledAgent(agent=agent1, in_use=True, browser_id="b1")
+        )
+        pool._agents.append(
+            PooledAgent(agent=agent2, in_use=True, browser_id="b2")
+        )
         pool._started = True
 
         # Schedule agent release after 0.5 seconds
@@ -374,8 +394,12 @@ class TestAgentPoolDynamicSizing:
         elapsed = time.time() - start
 
         # Should have acquired the REPLACEMENT agent (not agent1)
-        assert acquired_agent is not agent1, "Should get replacement, not the destroyed agent"
-        assert elapsed >= 0.4, f"Should have waited for release, got {elapsed:.2f}s"
+        assert (
+            acquired_agent is not agent1
+        ), "Should get replacement, not the destroyed agent"
+        assert (
+            elapsed >= 0.4
+        ), f"Should have waited for release, got {elapsed:.2f}s"
         assert elapsed < 3.0, f"Waited too long: {elapsed:.2f}s"
 
         await release_task
@@ -392,7 +416,11 @@ class TestAgentPoolDynamicSizing:
         pool = AgentPool(agent_factory=factory, pool_config=config)
 
         # Start with one agent in use
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True, browser_id="b1"))
+        pool._agents.append(
+            PooledAgent(
+                agent=self._create_mock_agent(), in_use=True, browser_id="b1"
+            )
+        )
         pool._started = True
 
         assert pool.get_stats()["agents_created_on_demand"] == 0
@@ -408,7 +436,10 @@ class TestAgentPoolDynamicSizing:
         from bassi.config import PoolConfig
 
         config = PoolConfig(initial_size=5, keep_idle_size=2, max_size=30)
-        pool = AgentPool(agent_factory=lambda: self._create_mock_agent(), pool_config=config)
+        pool = AgentPool(
+            agent_factory=lambda: self._create_mock_agent(),
+            pool_config=config,
+        )
         pool._started = True
 
         stats = pool.get_stats()
@@ -424,12 +455,21 @@ class TestAgentPoolDynamicSizing:
         from bassi.config import PoolConfig
 
         config = PoolConfig(initial_size=3, keep_idle_size=2, max_size=10)
-        pool = AgentPool(agent_factory=lambda: self._create_mock_agent(), pool_config=config)
+        pool = AgentPool(
+            agent_factory=lambda: self._create_mock_agent(),
+            pool_config=config,
+        )
 
         # Pool with 3 agents, 2 in use, 1 idle (below keep_idle_size=2)
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True))
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True))
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=False))
+        pool._agents.append(
+            PooledAgent(agent=self._create_mock_agent(), in_use=True)
+        )
+        pool._agents.append(
+            PooledAgent(agent=self._create_mock_agent(), in_use=True)
+        )
+        pool._agents.append(
+            PooledAgent(agent=self._create_mock_agent(), in_use=False)
+        )
         pool._started = True
 
         assert pool._get_idle_count() == 1
@@ -441,11 +481,18 @@ class TestAgentPoolDynamicSizing:
         from bassi.config import PoolConfig
 
         config = PoolConfig(initial_size=2, keep_idle_size=1, max_size=2)
-        pool = AgentPool(agent_factory=lambda: self._create_mock_agent(), pool_config=config)
+        pool = AgentPool(
+            agent_factory=lambda: self._create_mock_agent(),
+            pool_config=config,
+        )
 
         # Pool at max size (2), with 0 idle
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True))
-        pool._agents.append(PooledAgent(agent=self._create_mock_agent(), in_use=True))
+        pool._agents.append(
+            PooledAgent(agent=self._create_mock_agent(), in_use=True)
+        )
+        pool._agents.append(
+            PooledAgent(agent=self._create_mock_agent(), in_use=True)
+        )
         pool._started = True
 
         assert pool._get_idle_count() == 0
@@ -454,7 +501,9 @@ class TestAgentPoolDynamicSizing:
     @pytest.mark.asyncio
     async def test_deprecated_size_parameter_still_works(self):
         """Test backward compatibility with deprecated size parameter."""
-        pool = AgentPool(size=3, agent_factory=lambda: self._create_mock_agent())
+        pool = AgentPool(
+            size=3, agent_factory=lambda: self._create_mock_agent()
+        )
 
         assert pool.config.initial_size == 3
         assert pool.size == 3  # Backward compat property

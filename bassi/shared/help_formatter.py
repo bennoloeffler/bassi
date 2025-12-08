@@ -5,7 +5,8 @@ Generates beautifully formatted help text for the console.
 """
 
 from typing import List, Optional
-from .help_system import HelpItem, EcosystemScanner
+
+from .help_system import EcosystemScanner, HelpItem
 
 
 class HelpFormatter:
@@ -41,9 +42,13 @@ class HelpFormatter:
 
         # Quick facts
         lines.append("QUICK FACTS:")
-        lines.append(f"• Type: {item.type.capitalize()} (specialized {'toolkit' if item.type == 'skill' else item.type})")
+        lines.append(
+            f"• Type: {item.type.capitalize()} (specialized {'toolkit' if item.type == 'skill' else item.type})"
+        )
         if item.file_path:
-            rel_path = item.file_path.replace(str(item.file_path.split('/.claude')[0]), "")
+            rel_path = item.file_path.replace(
+                str(item.file_path.split("/.claude")[0]), ""
+            )
             lines.append(f"• Location: {rel_path}")
         lines.append("")
 
@@ -84,22 +89,24 @@ class HelpFormatter:
 
         return "\n".join(lines)
 
-    def format_item_brief(self, item: HelpItem, index: Optional[int] = None) -> str:
+    def format_item_brief(
+        self, item: HelpItem, index: Optional[int] = None
+    ) -> str:
         """Format item as a brief list entry."""
         prefix = f"{index}️⃣  " if index else "   "
 
-        icon = {
-            "command": "🟠",
-            "skill": "🟡",
-            "agent": "🔷"
-        }.get(item.type, "◆")
+        icon = {"command": "🟠", "skill": "🟡", "agent": "🔷"}.get(
+            item.type, "◆"
+        )
 
         lines = [f"{icon} {item.name}"]
         if item.description:
             lines.append(f"   {item.description[:60]}...")
         return "\n".join(lines)
 
-    def format_items_list(self, items: List[HelpItem], title: str = "") -> str:
+    def format_items_list(
+        self, items: List[HelpItem], title: str = ""
+    ) -> str:
         """Format multiple items as a list."""
         lines = []
 
@@ -134,7 +141,7 @@ class HelpFormatter:
             for item in type_items:
                 lines.append(f"  {item.name}")
                 if item.description:
-                    desc = item.description[:self.width - 10]
+                    desc = item.description[: self.width - 10]
                     lines.append(f"     {desc}")
                 lines.append("")
 
@@ -221,21 +228,33 @@ class HelpFormatter:
         if agents:
             lines.append("🔷 AGENTS:")
             for agent in sorted(agents, key=lambda x: x.name):
-                desc = agent.description[:40] + "..." if len(agent.description) > 40 else agent.description
+                desc = (
+                    agent.description[:40] + "..."
+                    if len(agent.description) > 40
+                    else agent.description
+                )
                 lines.append(f"   • {agent.name}: {desc}")
             lines.append("")
 
         if skills:
             lines.append("🟡 SKILLS:")
             for skill in sorted(skills, key=lambda x: x.name):
-                desc = skill.description[:40] + "..." if len(skill.description) > 40 else skill.description
+                desc = (
+                    skill.description[:40] + "..."
+                    if len(skill.description) > 40
+                    else skill.description
+                )
                 lines.append(f"   • {skill.name}: {desc}")
             lines.append("")
 
         if commands:
             lines.append("🟠 COMMANDS:")
             for cmd in sorted(commands, key=lambda x: x.name):
-                desc = cmd.description[:40] + "..." if len(cmd.description) > 40 else cmd.description
+                desc = (
+                    cmd.description[:40] + "..."
+                    if len(cmd.description) > 40
+                    else cmd.description
+                )
                 lines.append(f"   • {cmd.name}: {desc}")
             lines.append("")
 
@@ -252,12 +271,20 @@ class HelpFormatter:
             "ecosystem": "🗺️",
             "skill": "📊",
             "command": "⚙️",
-            "agent": "🔧"
+            "agent": "🔧",
         }.get(box_type, "ℹ️")
 
-        top = self.BOX_TOP_LEFT + self.BOX_HORIZONTAL * (self.width - 2) + self.BOX_TOP_RIGHT
+        top = (
+            self.BOX_TOP_LEFT
+            + self.BOX_HORIZONTAL * (self.width - 2)
+            + self.BOX_TOP_RIGHT
+        )
         middle = f"{self.BOX_VERTICAL}{left_pad}{icon} {title}{right_pad}{self.BOX_VERTICAL}"
-        bottom = self.BOX_BOTTOM_LEFT + self.BOX_HORIZONTAL * (self.width - 2) + self.BOX_BOTTOM_RIGHT
+        bottom = (
+            self.BOX_BOTTOM_LEFT
+            + self.BOX_HORIZONTAL * (self.width - 2)
+            + self.BOX_BOTTOM_RIGHT
+        )
 
         return f"{top}\n{middle}\n{bottom}"
 
@@ -313,7 +340,9 @@ class HelpFormatter:
                 related.append(agent_ref)
 
             # Check relationships built by scanner
-            cmd_key = f"/{cmd.name}" if not cmd.name.startswith("/") else cmd.name
+            cmd_key = (
+                f"/{cmd.name}" if not cmd.name.startswith("/") else cmd.name
+            )
             if cmd_key in scanner.relationships:
                 related.extend(scanner.relationships[cmd_key])
 

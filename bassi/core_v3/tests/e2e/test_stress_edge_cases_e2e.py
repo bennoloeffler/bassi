@@ -54,20 +54,23 @@ def _send_message_and_wait(page, message: str, timeout: int = 30000):
 
 def _get_console_errors(page) -> list[str]:
     """Get any console errors from the page."""
-    errors = page.evaluate("""
+    errors = page.evaluate(
+        """
         () => {
             if (window._consoleErrors) {
                 return window._consoleErrors;
             }
             return [];
         }
-    """)
+    """
+    )
     return errors or []
 
 
 def _setup_console_error_capture(page):
     """Set up console error capturing for a page."""
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             window._consoleErrors = [];
             const originalError = console.error;
@@ -76,7 +79,8 @@ def _setup_console_error_capture(page):
                 originalError.apply(console, args);
             };
         }
-    """)
+    """
+    )
 
 
 # =============================================================================
@@ -105,9 +109,7 @@ def test_cancel_while_not_working_is_safe_noop(page, live_server):
     _setup_console_error_capture(page)
 
     # Verify agent is NOT working initially
-    is_working = page.evaluate(
-        "() => window.bassiClient?.isAgentWorking"
-    )
+    is_working = page.evaluate("() => window.bassiClient?.isAgentWorking")
     assert is_working is False, "Agent should not be working initially"
 
     # Check if stop button exists but is hidden (correct UI behavior)
@@ -123,21 +125,27 @@ def test_cancel_while_not_working_is_safe_noop(page, live_server):
 
     # Programmatically send interrupt via WebSocket (simulating edge case)
     # This tests that the system handles spurious interrupts gracefully
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({type: 'interrupt'}));
             }
         }
-    """)
+    """
+    )
 
     # Brief pause to allow any error to surface
     page.wait_for_timeout(500)
 
     # Verify no console errors
     errors = _get_console_errors(page)
-    critical_errors = [e for e in errors if "error" in e.lower() and "interrupt" in e.lower()]
-    assert len(critical_errors) == 0, f"Should not have interrupt errors: {critical_errors}"
+    critical_errors = [
+        e for e in errors if "error" in e.lower() and "interrupt" in e.lower()
+    ]
+    assert (
+        len(critical_errors) == 0
+    ), f"Should not have interrupt errors: {critical_errors}"
 
     # Verify agent is still not working
     is_working_after = page.evaluate(
@@ -168,7 +176,9 @@ def test_cancel_while_not_working_is_safe_noop(page, live_server):
 
     # Verify agent responded
     assistant_messages = page.query_selector_all(".assistant-message")
-    assert len(assistant_messages) > 0, "Agent should have responded after cancel no-op"
+    assert (
+        len(assistant_messages) > 0
+    ), "Agent should have responded after cancel no-op"
 
 
 # =============================================================================
@@ -217,13 +227,15 @@ def test_rapid_cancel_then_new_message(page, live_server):
     page.wait_for_timeout(200)
 
     # Send interrupt via WebSocket (since button might not be visible yet)
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({type: 'interrupt'}));
             }
         }
-    """)
+    """
+    )
 
     # Brief pause after cancel
     page.wait_for_timeout(100)
@@ -250,19 +262,24 @@ def test_rapid_cancel_then_new_message(page, live_server):
 
     # Verify no critical console errors
     errors = _get_console_errors(page)
-    critical_errors = [e for e in errors if "error" in e.lower() and "fatal" in e.lower()]
-    assert len(critical_errors) == 0, f"Should not have fatal errors: {critical_errors}"
+    critical_errors = [
+        e for e in errors if "error" in e.lower() and "fatal" in e.lower()
+    ]
+    assert (
+        len(critical_errors) == 0
+    ), f"Should not have fatal errors: {critical_errors}"
 
     # Verify connection is still good
     page.wait_for_selector(
-        "#connection-status:has-text('Connected')", timeout=5000,
+        "#connection-status:has-text('Connected')",
+        timeout=5000,
     )
 
     # Count user messages - should have both
     user_messages = page.query_selector_all(".user-message")
-    assert len(user_messages) >= 2, (
-        f"Should have at least 2 user messages, got {len(user_messages)}"
-    )
+    assert (
+        len(user_messages) >= 2
+    ), f"Should have at least 2 user messages, got {len(user_messages)}"
 
 
 # =============================================================================
@@ -309,7 +326,8 @@ def test_multiple_rapid_hints(page, live_server):
     # Send multiple hints rapidly via WebSocket
     # Note: Hints are a feature where additional context is sent while agent works
     for i in range(3):
-        page.evaluate(f"""
+        page.evaluate(
+            f"""
             () => {{
                 if (window.bassiClient && window.bassiClient.ws) {{
                     window.bassiClient.ws.send(JSON.stringify({{
@@ -318,7 +336,8 @@ def test_multiple_rapid_hints(page, live_server):
                     }}));
                 }}
             }}
-        """)
+        """
+        )
         # Very short delay between hints
         page.wait_for_timeout(50)
 
@@ -333,12 +352,17 @@ def test_multiple_rapid_hints(page, live_server):
 
     # Verify no critical errors
     errors = _get_console_errors(page)
-    critical_errors = [e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()]
-    assert len(critical_errors) == 0, f"Should not have critical errors: {critical_errors}"
+    critical_errors = [
+        e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()
+    ]
+    assert (
+        len(critical_errors) == 0
+    ), f"Should not have critical errors: {critical_errors}"
 
     # Verify connection is still good
     page.wait_for_selector(
-        "#connection-status:has-text('Connected')", timeout=5000,
+        "#connection-status:has-text('Connected')",
+        timeout=5000,
     )
 
     # Verify we can still send a message afterward
@@ -401,7 +425,8 @@ def test_cancel_during_hint_processing(page, live_server):
     page.wait_for_timeout(100)
 
     # Send a hint via WebSocket
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({
@@ -410,19 +435,22 @@ def test_cancel_during_hint_processing(page, live_server):
                 }));
             }
         }
-    """)
+    """
+    )
 
     # Very short delay
     page.wait_for_timeout(50)
 
     # Immediately cancel via WebSocket
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({type: 'interrupt'}));
             }
         }
-    """)
+    """
+    )
 
     # Wait for agent to finish (either completed or cancelled)
     page.wait_for_function(
@@ -432,12 +460,17 @@ def test_cancel_during_hint_processing(page, live_server):
 
     # Verify no critical errors
     errors = _get_console_errors(page)
-    critical_errors = [e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()]
-    assert len(critical_errors) == 0, f"Should not have critical errors: {critical_errors}"
+    critical_errors = [
+        e for e in errors if "uncaught" in e.lower() or "fatal" in e.lower()
+    ]
+    assert (
+        len(critical_errors) == 0
+    ), f"Should not have critical errors: {critical_errors}"
 
     # Verify connection is still good
     page.wait_for_selector(
-        "#connection-status:has-text('Connected')", timeout=5000,
+        "#connection-status:has-text('Connected')",
+        timeout=5000,
     )
 
     # Verify we can still send a message (system not broken)
@@ -456,7 +489,9 @@ def test_cancel_during_hint_processing(page, live_server):
 
     # Verify agent responded to the new message
     assistant_messages = page.query_selector_all(".assistant-message")
-    assert len(assistant_messages) > 0, "Agent should respond after hint cancel"
+    assert (
+        len(assistant_messages) > 0
+    ), "Agent should respond after hint cancel"
 
 
 # =============================================================================
@@ -503,13 +538,15 @@ def test_state_consistency_after_edge_operations(page, live_server):
     )
 
     # Immediate cancel
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({type: 'interrupt'}));
             }
         }
-    """)
+    """
+    )
 
     page.wait_for_function(
         "() => window.bassiClient && window.bassiClient.isAgentWorking === false",
@@ -528,7 +565,8 @@ def test_state_consistency_after_edge_operations(page, live_server):
     page.wait_for_timeout(50)
 
     # Send hint
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({
@@ -537,18 +575,21 @@ def test_state_consistency_after_edge_operations(page, live_server):
                 }));
             }
         }
-    """)
+    """
+    )
 
     page.wait_for_timeout(30)
 
     # Cancel
-    page.evaluate("""
+    page.evaluate(
+        """
         () => {
             if (window.bassiClient && window.bassiClient.ws) {
                 window.bassiClient.ws.send(JSON.stringify({type: 'interrupt'}));
             }
         }
-    """)
+    """
+    )
 
     page.wait_for_function(
         "() => window.bassiClient && window.bassiClient.isAgentWorking === false",
@@ -573,7 +614,8 @@ def test_state_consistency_after_edge_operations(page, live_server):
 
     # 1. Connection should still be active
     page.wait_for_selector(
-        "#connection-status:has-text('Connected')", timeout=5000,
+        "#connection-status:has-text('Connected')",
+        timeout=5000,
     )
 
     # 2. isAgentWorking should be false
@@ -587,16 +629,21 @@ def test_state_consistency_after_edge_operations(page, live_server):
     # 4. No critical console errors
     errors = _get_console_errors(page)
     critical_errors = [
-        e for e in errors
-        if "uncaught" in e.lower() or "fatal" in e.lower() or "exception" in e.lower()
+        e
+        for e in errors
+        if "uncaught" in e.lower()
+        or "fatal" in e.lower()
+        or "exception" in e.lower()
     ]
-    assert len(critical_errors) == 0, f"Should not have critical errors: {critical_errors}"
+    assert (
+        len(critical_errors) == 0
+    ), f"Should not have critical errors: {critical_errors}"
 
     # 5. Should have at least 3 user messages
     user_messages = page.query_selector_all(".user-message")
-    assert len(user_messages) >= 3, (
-        f"Should have at least 3 user messages, got {len(user_messages)}"
-    )
+    assert (
+        len(user_messages) >= 3
+    ), f"Should have at least 3 user messages, got {len(user_messages)}"
 
     # 6. Should have at least one assistant response
     # (from the final normal message at minimum)

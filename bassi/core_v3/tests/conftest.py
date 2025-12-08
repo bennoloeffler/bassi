@@ -55,24 +55,35 @@ class AutoRespondingMockAgentClient(MockAgentClient):
                         if isinstance(content, list):
                             # Get the LAST text block (the actual user query, not history)
                             for block in reversed(content):
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     text = block.get("text", "")
                                     # Skip history blocks
-                                    if not text.startswith("[CONVERSATION HISTORY"):
+                                    if not text.startswith(
+                                        "[CONVERSATION HISTORY"
+                                    ):
                                         return text.lower()
                     # Check for user_message in older control protocol format
                     elif "user_message" in msg:
                         content = msg["user_message"].get("content", [])
                         if isinstance(content, list):
                             for block in reversed(content):
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     return block.get("text", "").lower()
                     # Check for direct content field
                     elif "content" in msg:
                         content = msg.get("content", [])
                         if isinstance(content, list):
                             for block in reversed(content):
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     return block.get("text", "").lower()
                 # Handle SDK Message objects
                 elif hasattr(msg, "content"):
@@ -158,21 +169,30 @@ class AutoRespondingMockAgentClient(MockAgentClient):
                         content = message_data.get("content", [])
                         if isinstance(content, list):
                             for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     full_text += block.get("text", "") + " "
                     # Check for user_message in older control protocol format
                     elif "user_message" in msg:
                         content = msg["user_message"].get("content", [])
                         if isinstance(content, list):
                             for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     full_text += block.get("text", "") + " "
                     # Check for direct content field
                     elif "content" in msg:
                         content = msg.get("content", [])
                         if isinstance(content, list):
                             for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "text"
+                                ):
                                     full_text += block.get("text", "") + " "
                 # Handle SDK Message objects
                 elif hasattr(msg, "content"):
@@ -298,17 +318,17 @@ def live_server(tmp_path_factory):
     # CRITICAL FIX: Manually start the Agent Pool BEFORE starting server
     # The lifespan handler doesn't fire when uvicorn runs in a background thread
     # We must start the pool manually to ensure agents are ready
-    print(
-        "\n🔧 [TEST] Manually starting Agent Pool with mock factory..."
-    )
+    #
+    # IMPORTANT: Do NOT use asyncio.set_event_loop() here!
+    # Setting a global event loop pollutes pytest-asyncio's ability to manage
+    # event loops for async tests that run later in the session.
+    print("\n🔧 [TEST] Manually starting Agent Pool with mock factory...")
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # Note: We do NOT call asyncio.set_event_loop(loop) to avoid polluting global state
     try:
         # Start the agent pool (this pre-connects agents with mock client)
         loop.run_until_complete(server_instance.agent_pool.start())
-        print(
-            "✅ [TEST] Agent Pool started successfully with mock client"
-        )
+        print("✅ [TEST] Agent Pool started successfully with mock client")
     except Exception as e:
         print(f"❌ [TEST] Failed to start Agent Pool: {e}")
         raise
@@ -411,7 +431,9 @@ def live_server(tmp_path_factory):
     try:
         # Cleanup Agent Pool
         print("\n🧹 [TEST] Cleaning up Agent Pool...")
-        loop.run_until_complete(server_instance.agent_pool.shutdown(force=True))
+        loop.run_until_complete(
+            server_instance.agent_pool.shutdown(force=True)
+        )
         print("✅ [TEST] Agent Pool shutdown complete")
 
         # Signal server to shutdown gracefully
