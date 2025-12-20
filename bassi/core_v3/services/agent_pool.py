@@ -43,12 +43,21 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Callable, Optional
 
 from bassi.config import PoolConfig, get_pool_config
 from bassi.core_v3.agent_session import BassiAgentSession
 
 logger = logging.getLogger(__name__)
+
+
+class LifecycleCommand(Enum):
+    """Commands for the agent lifecycle manager task."""
+
+    CREATE = auto()  # Create and connect a new agent
+    DESTROY = auto()  # Disconnect and destroy an agent
+    SHUTDOWN = auto()  # Stop the lifecycle manager
 
 
 class PoolExhaustedException(Exception):
@@ -222,6 +231,11 @@ class AgentPool:
             0  # Number of agents currently being created
         )
 
+        # Lifecycle manager: single task that owns all connect/disconnect operations
+        # This ensures anyio cancel scopes are entered and exited from the same task
+        self._lifecycle_queue: asyncio.Queue = asyncio.Queue()
+        self._lifecycle_task: Optional[asyncio.Task] = None
+
         # Stats
         self._total_acquires = 0
         self._total_releases = 0
@@ -255,6 +269,13 @@ class AgentPool:
             )
             self._shutdown = False
 
+        # CRITICAL: Start/restart lifecycle manager BEFORE early return!
+        # The lifecycle manager owns all connect/disconnect operations.
+        # Without it, agent disconnect fails with "cancel scope" errors.
+        if not self._lifecycle_task or self._lifecycle_task.done():
+            logger.info("🔄 [POOL] Starting lifecycle manager...")
+            self._lifecycle_task = asyncio.create_task(self._lifecycle_manager())
+
         if self._started and len(self._agents) > 0:
             # Check if all agents are stuck as in_use (possible hot reload issue)
             in_use_count = sum(1 for a in self._agents if a.in_use)
@@ -284,6 +305,9 @@ class AgentPool:
         )
         start_time = time.time()
 
+        # NOTE: Lifecycle manager is started above (before early return check)
+        # to ensure it's running even after hot reload recovery.
+
         # Create and connect first agent (blocking)
         print("🔶🔶🔶 [POOL] Creating first agent (blocking)...")
         logger.info("🔶 [POOL] Creating first agent (blocking)...")
@@ -309,13 +333,95 @@ class AgentPool:
             )
 
     async def _create_and_connect_agent(self) -> BassiAgentSession:
-        """Create a new agent and connect it to the SDK."""
+        """
+        Create a new agent via the lifecycle manager.
+
+        The lifecycle manager task owns all connect/disconnect operations
+        to ensure anyio cancel scopes are entered and exited from the same task.
+        """
         if not self.agent_factory:
             raise RuntimeError("No agent_factory configured")
 
+        # If lifecycle manager is running, use it
+        if self._lifecycle_task and not self._lifecycle_task.done():
+            future: asyncio.Future[BassiAgentSession] = asyncio.Future()
+            await self._lifecycle_queue.put((LifecycleCommand.CREATE, future))
+            return await future
+
+        # Fallback for initial startup (before lifecycle manager starts)
         agent = self.agent_factory()
         await agent.connect()
         return agent
+
+    async def _lifecycle_manager(self) -> None:
+        """
+        Single task that owns all agent connect/disconnect operations.
+
+        This ensures anyio cancel scopes are entered and exited from the same task,
+        avoiding the "Attempted to exit cancel scope in a different task" error.
+
+        The lifecycle manager processes commands from a queue:
+        - CREATE: Create a new agent and resolve the future with it
+        - DESTROY: Disconnect an agent
+        - SHUTDOWN: Stop the lifecycle manager
+        """
+        logger.info("🔄 [POOL] Lifecycle manager started")
+
+        while True:
+            try:
+                # Wait for commands with a timeout to check shutdown flag
+                try:
+                    cmd, data = await asyncio.wait_for(
+                        self._lifecycle_queue.get(), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    # Check if we should shutdown
+                    if self._shutdown:
+                        logger.info(
+                            "🔄 [POOL] Lifecycle manager stopping (shutdown)"
+                        )
+                        break
+                    continue
+
+                if cmd == LifecycleCommand.CREATE:
+                    # data is a Future to resolve with the created agent
+                    future: asyncio.Future[BassiAgentSession] = data
+                    try:
+                        agent = self.agent_factory()
+                        await agent.connect()
+                        future.set_result(agent)
+                        logger.debug("🔄 [POOL] Lifecycle: agent created")
+                    except Exception as e:
+                        future.set_exception(e)
+                        logger.error(f"🔄 [POOL] Lifecycle: create failed: {e}")
+
+                elif cmd == LifecycleCommand.DESTROY:
+                    # data is the agent to destroy
+                    agent: BassiAgentSession = data
+                    try:
+                        await agent.disconnect()
+                        logger.debug(
+                            "🔄 [POOL] Lifecycle: agent disconnected"
+                        )
+                    except Exception as e:
+                        # Log but don't raise - agent cleanup is best-effort
+                        logger.warning(
+                            f"🔄 [POOL] Lifecycle: disconnect warning: {e}"
+                        )
+
+                elif cmd == LifecycleCommand.SHUTDOWN:
+                    logger.info(
+                        "🔄 [POOL] Lifecycle manager received shutdown command"
+                    )
+                    break
+
+            except asyncio.CancelledError:
+                logger.info("🔄 [POOL] Lifecycle manager cancelled")
+                break
+            except Exception as e:
+                logger.error(f"🔄 [POOL] Lifecycle manager error: {e}")
+
+        logger.info("🔄 [POOL] Lifecycle manager stopped")
 
     async def _warmup_remaining(self, count: int) -> None:
         """Warm up additional agents in background."""
@@ -326,7 +432,7 @@ class AgentPool:
             f"(INITIAL={self.config.initial_size}, MAX={self.config.max_size})"
         )
 
-        for i in range(count):
+        for _ in range(count):
             if self._shutdown:
                 logger.info("⏹️ [POOL] Warmup cancelled (shutdown)")
                 break
@@ -440,7 +546,7 @@ class AgentPool:
             f"🌱 [POOL] _grow_agents: starting to create {count} agents"
         )
 
-        for i in range(count):
+        for _ in range(count):
             if self._shutdown:
                 logger.info("🌱 [POOL] _grow_agents: stopped (shutdown)")
                 break
@@ -713,22 +819,32 @@ class AgentPool:
         self, agent: BassiAgentSession, browser_id: str
     ) -> None:
         """
-        Destroy an agent by disconnecting it.
+        Destroy an agent via the lifecycle manager.
 
-        Runs in background to avoid blocking the release call.
+        The lifecycle manager task owns all connect/disconnect operations
+        to ensure anyio cancel scopes are entered and exited from the same task.
+
+        Runs asynchronously to avoid blocking the release call.
         Handles errors gracefully since the agent is already removed from pool.
         """
-        try:
-            await agent.disconnect()
+        # Send destroy command to lifecycle manager
+        if self._lifecycle_task and not self._lifecycle_task.done():
+            await self._lifecycle_queue.put((LifecycleCommand.DESTROY, agent))
             logger.info(
-                f"✅ [POOL] Agent from {browser_id[:8]} disconnected successfully"
+                f"✅ [POOL] Agent from {browser_id[:8]} queued for disconnect"
             )
-        except Exception as e:
-            # Log but don't raise - agent is already removed from pool
-            # Let Python GC clean up the resources
-            logger.warning(
-                f"⚠️ [POOL] Failed to disconnect agent from {browser_id[:8]}: {e}"
-            )
+        else:
+            # Fallback: try direct disconnect (may fail with cancel scope error)
+            try:
+                await agent.disconnect()
+                logger.info(
+                    f"✅ [POOL] Agent from {browser_id[:8]} disconnected (direct)"
+                )
+            except Exception as e:
+                # Log but don't raise - agent is already removed from pool
+                logger.warning(
+                    f"⚠️ [POOL] Failed to disconnect agent from {browser_id[:8]}: {e}"
+                )
 
     async def _create_replacement_agent(self) -> None:
         """
@@ -798,27 +914,63 @@ class AgentPool:
                 pass
 
         if force:
-            # Full shutdown: disconnect all agents
+            # Full shutdown: disconnect all agents via lifecycle manager
             async with self._lock:
-                disconnect_tasks = []
+                # Queue all agents for disconnect
                 for pooled in self._agents:
-                    try:
-                        disconnect_tasks.append(pooled.agent.disconnect())
-                    except Exception as e:
-                        logger.error(f"Error preparing disconnect: {e}")
-
-                if disconnect_tasks:
-                    await asyncio.gather(
-                        *disconnect_tasks, return_exceptions=True
-                    )
+                    if self._lifecycle_task and not self._lifecycle_task.done():
+                        await self._lifecycle_queue.put(
+                            (LifecycleCommand.DESTROY, pooled.agent)
+                        )
+                    else:
+                        # Fallback to direct disconnect
+                        try:
+                            await pooled.agent.disconnect()
+                        except Exception as e:
+                            logger.warning(
+                                f"Error during shutdown disconnect: {e}"
+                            )
 
                 self._agents.clear()
+
+            # Signal lifecycle manager to stop
+            if self._lifecycle_task and not self._lifecycle_task.done():
+                await self._lifecycle_queue.put(
+                    (LifecycleCommand.SHUTDOWN, None)
+                )
+                # Wait for lifecycle manager to finish processing
+                try:
+                    await asyncio.wait_for(self._lifecycle_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "⚠️ [POOL] Lifecycle manager didn't stop in time, cancelling"
+                    )
+                    self._lifecycle_task.cancel()
+                    try:
+                        await self._lifecycle_task
+                    except asyncio.CancelledError:
+                        pass
+
             self._started = False
             logger.info(
                 "✅ [POOL] Full shutdown complete (agents disconnected)"
             )
         else:
             # Soft shutdown: keep agents connected for hot reload
+            # But stop the lifecycle manager (will restart on next start())
+            if self._lifecycle_task and not self._lifecycle_task.done():
+                await self._lifecycle_queue.put(
+                    (LifecycleCommand.SHUTDOWN, None)
+                )
+                try:
+                    await asyncio.wait_for(self._lifecycle_task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    self._lifecycle_task.cancel()
+                    try:
+                        await self._lifecycle_task
+                    except asyncio.CancelledError:
+                        pass
+
             logger.info(
                 f"✅ [POOL] Soft shutdown complete (keeping {len(self._agents)} agents connected)"
             )

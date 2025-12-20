@@ -46,6 +46,11 @@ from bassi.shared.permission_config import get_permission_mode
 from bassi.shared.sdk_loader import create_sdk_mcp_server
 from bassi.shared.sdk_types import SystemMessage, ToolResultBlock, UserMessage
 
+from bassi.core_v3.services.error_recovery_service import (
+    ErrorRecoveryService,
+    get_error_recovery_service,
+)
+
 # Logging configured by entry point (cli.py)
 logger = logging.getLogger(__name__)
 
@@ -1266,6 +1271,12 @@ class WebUIServerV3:
                             # Reset text block so next text starts new block
                             current_text_block_id = None
 
+                            # Track tool for error recovery context
+                            error_recovery_service = get_error_recovery_service()
+                            error_recovery_service.set_last_tool_info(
+                                event.get("tool_name"), event.get("input")
+                            )
+
                         elif event_type == "tool_end":
                             # Map Agent SDK tool_use_id to our display ID
                             tool_use_id = event.get("id")
@@ -1452,13 +1463,129 @@ class WebUIServerV3:
                         # Continue gracefully - naming is not critical
 
             except Exception as e:
+                error_msg = str(e)
                 logger.error(f"Error processing message: {e}", exc_info=True)
+                print(f"❌ ERROR: {error_msg}", flush=True)
+
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "message": str(e),
+                        "message": error_msg,
                     }
                 )
+
+                # Use ErrorRecoveryService for intelligent error handling
+                try:
+                    print("🔍 Analyzing error for recovery...", flush=True)
+                    error_recovery_service = get_error_recovery_service()
+                    # Pass the original task so recovery can reference it
+                    error_context = error_recovery_service.analyze_error(
+                        e, original_task=user_message_text
+                    )
+
+                    print(
+                        f"🔍 Error analyzed: category={error_context.category.value}, "
+                        f"tool={error_context.tool_name}",
+                        flush=True,
+                    )
+
+                    # Check if automatic recovery should be attempted
+                    if error_recovery_service.should_attempt_recovery(error_context):
+                        print(
+                            f"🔄 Attempting INVISIBLE recovery for {error_context.category.value} error",
+                            flush=True,
+                        )
+
+                        # Generate rich recovery prompt with full context
+                        recovery_prompt = (
+                            error_recovery_service.generate_recovery_prompt(
+                                error_context
+                            )
+                        )
+                        print(
+                            f"📝 Recovery prompt generated ({len(recovery_prompt)} chars)",
+                            flush=True,
+                        )
+
+                        # NOTE: Recovery is INVISIBLE - we do NOT send the prompt to frontend
+                        # The agent receives it but the user only sees the agent's actions
+
+                        try:
+                            # Reset message tracking for recovery response
+                            message_counter = 0
+                            text_block_counter = 0
+                            tool_counter = 0
+                            current_text_block_id = None
+                            tool_id_map = {}
+
+                            # Clear tool tracking after recovery prompt is generated
+                            error_recovery_service.clear_last_tool_info()
+
+                            print("🔄 Querying agent with recovery prompt...", flush=True)
+                            async for message in session.query(
+                                recovery_prompt, session_id=connection_id
+                            ):
+                                # Same message processing logic as main query
+                                events = convert_message_to_websocket(message)
+                                for event in events:
+                                    event_type = event.get("type")
+                                    if event_type == "text_delta":
+                                        if current_text_block_id is None:
+                                            current_text_block_id = f"recovery-{message_counter}-text-{text_block_counter}"
+                                            text_block_counter += 1
+                                        event["id"] = current_text_block_id
+                                    elif event_type == "tool_start":
+                                        tool_use_id = event.get("id")
+                                        display_id = f"recovery-{message_counter}-tool-{tool_counter}"
+                                        tool_counter += 1
+                                        tool_id_map[tool_use_id] = display_id
+                                        event["id"] = display_id
+                                        current_text_block_id = None
+                                    elif event_type == "tool_end":
+                                        tool_use_id = event.get("id")
+                                        display_id = tool_id_map.get(tool_use_id)
+                                        if display_id:
+                                            event["id"] = display_id
+                                    await websocket.send_json(event)
+
+                            await websocket.send_json({"type": "message_complete"})
+                            print(
+                                f"✅ Recovery message processed for "
+                                f"{error_context.category.value} error",
+                                flush=True,
+                            )
+
+                        except Exception as recovery_error:
+                            print(
+                                f"❌ Recovery query failed: {recovery_error}",
+                                flush=True,
+                            )
+                            logger.error(
+                                f"❌ Recovery also failed: {recovery_error}",
+                                exc_info=True,
+                            )
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "message": f"Recovery failed: {recovery_error}",
+                                }
+                            )
+                    else:
+                        print(
+                            f"⚠️ Non-recoverable error: {error_context.category.value} - "
+                            f"user intervention may be required",
+                            flush=True,
+                        )
+
+                except Exception as analysis_error:
+                    print(
+                        f"❌ Error analysis failed: {analysis_error}",
+                        flush=True,
+                    )
+                    logger.error(
+                        f"Error analysis failed: {analysis_error}",
+                        exc_info=True,
+                    )
 
         elif msg_type == "interrupt":
             # User requested to interrupt agent execution

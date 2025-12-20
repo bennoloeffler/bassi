@@ -352,3 +352,5 @@ See [CLAUDE_TESTS.md](CLAUDE_TESTS.md) for complete patterns, examples, and trou
 - **WebSocket**: Error events, JSON error messages
 - **HTTP**: Standard HTTP error codes
 - **Async cleanup**: Proper context manager usage, connection cleanup
+
+# DONT WRITE SECRETS INTO ANY FILE THAT IS CHECKED IN, e.g. .mcp.json or .env.example or any other source file. Keep them in .env or read them from os!

@@ -2,7 +2,10 @@
   "mcpServers": {
     "ms365": {
       "command": "npx",
-      "args": ["-y", "@softeria/ms-365-mcp-server"],
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server"
+      ],
       "env": {
         "MS365_MCP_CLIENT_ID": "${MS365_CLIENT_ID}",
         "MS365_MCP_CLIENT_SECRET": "${MS365_CLIENT_SECRET}",
@@ -24,6 +27,25 @@
         "--password",
         "somethingsecure"
       ]
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ],
+      "env": {}
+    },
+    "rag-leann-server": {
+      "type": "stdio",
+      "command": "leann_mcp",
+      "args": [
+        "--embedding-mode",
+        "openai",
+        "--embedding-model",
+        "text-embedding-3-small"
+      ],
+      "env": {}
     }
   }
 }

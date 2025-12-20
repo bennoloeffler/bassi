@@ -156,6 +156,10 @@ Common libraries available:
 - os, shutil (file operations)
 
 The code runs in an isolated subprocess with timeout enforcement.
+
+IMPORTANT: Numeric parameters must be integers, not strings!
+- timeout: 300 (correct)
+- timeout: "300" (WRONG - causes TypeError)
 """,
     {
         "code": str,
@@ -171,7 +175,8 @@ async def task_automation_execute_python(
     code = args.get("code", "")
     description = args.get("description", "Python task")
     working_dir = args.get("working_dir")
-    timeout = args.get("timeout", 300)
+    # Defensive: coerce timeout to int in case LLM passes string
+    timeout = int(args.get("timeout", 300))
 
     if not code:
         return {

@@ -393,3 +393,4 @@ class ChatIndex:
 
 # Backward compatibility alias
 SessionIndex = ChatIndex
+
