@@ -133,7 +133,15 @@ User double-clicks install-bassi.command
          │
          ▼
 ┌─────────────────────────────────┐
-│ 12. Done! Show success dialog   │
+│ 12. Claude Authentication       │
+│     - Check for API key in .env │
+│     - Ask: subscription/API/skip│
+│     - Login or save API key     │
+└─────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────┐
+│ 13. Done! Show success dialog   │
 └─────────────────────────────────┘
 ```
 
@@ -170,14 +178,30 @@ The installer is **idempotent** - it can be run multiple times safely.
 | **Existing .env** | Asks: Keep / Replace (with backup) |
 | **Git uncommitted changes** | Warns user, stashes changes on update |
 | **Git pull conflicts** | Warns but continues, manual resolution needed |
+| **Claude authentication** | Offers subscription login, API key entry, or skip |
 
-## Desktop Launcher
+## Claude Authentication
 
-The installer creates `~/Desktop/Start bassi.app` - a proper macOS app bundle.
+At the end of installation, if no API key is found in `.env`, the user is asked:
+
+1. **"I have subscription"** - Opens `claude login` in Terminal for browser-based login
+2. **"I have API key"** - Prompts for API key (hidden input), saves to `.env`
+3. **"Skip for now"** - User can configure later manually
+
+If the Dropbox `.env` already has an active `ANTHROPIC_API_KEY`, this step is skipped.
+
+## Application
+
+The installer creates `/Applications/bassi.app` - a proper macOS app bundle.
+
+Users can launch it via:
+- **Applications folder** - Double-click "bassi"
+- **Spotlight** - Cmd+Space → type "bassi"
+- **Dock** - Drag from Applications to Dock for quick access
 
 ### App Bundle Structure
 ```
-Start bassi.app/
+bassi.app/
 ├── Contents/
 │   ├── Info.plist           # App metadata
 │   ├── MacOS/
